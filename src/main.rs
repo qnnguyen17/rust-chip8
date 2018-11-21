@@ -1,9 +1,7 @@
-extern crate chip8;
-
-use chip8::Chip8;
+mod cpu;
 
 fn main() {
-    let mut chip8 = Chip8::new();
-    chip8.load_game_data("15PUZZLE").unwrap();
-    chip8.run();
+    let mut processor = cpu::CPU::new();
+    processor.load_game_data("15PUZZLE").unwrap();
+    processor.run();
 }
