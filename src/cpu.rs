@@ -3,6 +3,7 @@ use std::io::prelude::*;
 use std::io::Result;
 
 use self::OpCode::*;
+use super::digits::DIGITS;
 
 #[derive(Clone, Copy, Debug)]
 enum OpCode {
@@ -71,7 +72,8 @@ pub struct CPU {
 
 impl CPU {
     pub fn new() -> CPU {
-        // TODO: store the digit sprites in 0x000 -> 0x1FF of memory
+        let mut memory = [0 as u8; 4096];
+        memory[..DIGITS.len()].clone_from_slice(&DIGITS);
         CPU {
             v: [0; 16],
             i: 0,
@@ -81,7 +83,7 @@ impl CPU {
             pc: 0x200,
             stack: [0; 16],
             sp: 0,
-            memory: [0; 4096],
+            memory,
             key: [false; 16],
             graphics: [0; 8 * 32],
         }

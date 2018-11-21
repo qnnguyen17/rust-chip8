@@ -1,4 +1,5 @@
 mod cpu;
+mod digits;
 
 fn main() {
     let mut processor = cpu::CPU::new();
