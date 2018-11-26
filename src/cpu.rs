@@ -1,9 +1,11 @@
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Result;
+use std::sync::mpsc::Sender;
 
 use self::OpCode::*;
 use super::digits::DIGITS;
+use super::window::GraphicsOp;
 
 #[derive(Clone, Copy, Debug)]
 enum OpCode {
@@ -66,12 +68,12 @@ pub struct CPU {
     // State of the 16 input keys
     key: [bool; 16],
 
-    // 64 (i.e. 8 bytes) by 32 bit graphics buffer
-    graphics: [u8; 8 * 32],
+    // Output for sending graphics instructions to the window handler
+    graphics_bus_out: Sender<GraphicsOp>,
 }
 
 impl CPU {
-    pub fn new() -> CPU {
+    pub fn new(graphics_bus_out: Sender<GraphicsOp>) -> CPU {
         let mut memory = [0 as u8; 4096];
         memory[..DIGITS.len()].clone_from_slice(&DIGITS);
         CPU {
@@ -85,7 +87,7 @@ impl CPU {
             sp: 0,
             memory,
             key: [false; 16],
-            graphics: [0; 8 * 32],
+            graphics_bus_out,
         }
     }
 
@@ -169,21 +171,28 @@ impl CPU {
             }
             Clear => {
                 println!("Clearing screen");
-                self.graphics = [0; 8 * 32];
+                self.graphics_bus_out.send(GraphicsOp::ClearScreen).unwrap();
             }
             Draw {
                 reg_x,
                 reg_y,
                 sprite_bytes,
             } => {
-                let i = self.i;
+                let i = self.i as usize;
+                let sprite_bytes = sprite_bytes as usize;
                 let x = self.get_reg_val(reg_x);
                 let y = self.get_reg_val(reg_y);
                 println!(
                     "Drawing {} bytes of sprite from address {:x} at location {},{} on the screen",
                     sprite_bytes, i, x, y
                 );
-                // TODO: implement graphical changes
+                self.graphics_bus_out
+                    .send(GraphicsOp::DrawSprite {
+                        x,
+                        y,
+                        sprite: self.memory[i..(i + sprite_bytes)].to_vec(),
+                    })
+                    .unwrap();
             }
             LdIAddr { addr } => {
                 println!("Loading reg I with address {:x}", addr);
