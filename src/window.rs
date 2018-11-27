@@ -47,7 +47,7 @@ impl WindowHandler {
     fn draw_frame_buffer(&mut self, window: &mut PistonWindow, e: &Event) {
         window.draw_2d(e, |c, g| {
             clear(BLACK, g);
-            for (index, byte) in self.frame_buffer.into_iter().enumerate() {
+            for (index, byte) in self.frame_buffer.iter().enumerate() {
                 let row = index / 8;
                 let octet_index = index % 8;
                 for bit_index in 0..8 {
@@ -84,7 +84,10 @@ impl WindowHandler {
                 for (i, byte) in sprite.into_iter().enumerate() {
                     let bit_offset = x % 8;
                     self.frame_buffer[first_byte + (i * 8)] ^= byte >> bit_offset;
-                    self.frame_buffer[second_byte + (i * 8)] ^= byte << (8 - bit_offset);
+
+                    if let Some(lower_bits) = byte.checked_shl(u32::from(8 - bit_offset)) {
+                        self.frame_buffer[second_byte + (i * 8)] ^= lower_bits
+                    }
                 }
             }
         }
@@ -94,5 +97,5 @@ impl WindowHandler {
 // Return whether or not the bit at index |bit_index| (from least significant)
 // is set.
 fn bit_is_set(byte: u8, bit_index: u8) -> bool {
-    return byte & (1 << bit_index) > 0;
+    byte & (1 << bit_index) > 0
 }
