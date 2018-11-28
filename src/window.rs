@@ -1,6 +1,5 @@
 extern crate piston_window;
 
-use self::GraphicsOp::*;
 use piston_window::*;
 use std::sync::mpsc::Receiver;
 
@@ -10,17 +9,11 @@ const PIXEL_SCALE_FACTOR: f64 = 10.0;
 
 pub struct WindowHandler {
     frame_buffer: [u8; 8 * 32],
-    graphics_bus_in: Receiver<GraphicsOp>,
-}
-
-#[derive(Clone, Debug)]
-pub enum GraphicsOp {
-    ClearScreen,
-    DrawSprite { x: u8, y: u8, sprite: Vec<u8> },
+    graphics_bus_in: Receiver<[u8; 8 * 32]>,
 }
 
 impl WindowHandler {
-    pub fn new(graphics_bus_in: Receiver<GraphicsOp>) -> WindowHandler {
+    pub fn new(graphics_bus_in: Receiver<[u8; 8 * 32]>) -> WindowHandler {
         WindowHandler {
             frame_buffer: [0; 8 * 32],
             graphics_bus_in,
@@ -39,8 +32,8 @@ impl WindowHandler {
     }
 
     fn update_frame_buffer(&mut self) {
-        while let Ok(op) = self.graphics_bus_in.try_recv() {
-            self.handle_graphics_operation(op)
+        while let Ok(new_screen) = self.graphics_bus_in.try_recv() {
+            self.frame_buffer = new_screen;
         }
     }
 
@@ -54,7 +47,7 @@ impl WindowHandler {
                     if bit_is_set(*byte, bit_index) {
                         let top = PIXEL_SCALE_FACTOR * row as f64;
                         let left = PIXEL_SCALE_FACTOR
-                            * (octet_index * 8 + (8 - bit_index) as usize) as f64;
+                            * (octet_index * 8 + (8 - bit_index - 1) as usize) as f64;
                         rectangle(
                             GREEN,
                             [left, top, PIXEL_SCALE_FACTOR, PIXEL_SCALE_FACTOR],
@@ -65,32 +58,6 @@ impl WindowHandler {
                 }
             }
         });
-    }
-
-    fn handle_graphics_operation(&mut self, op: GraphicsOp) {
-        match op {
-            ClearScreen => {
-                self.frame_buffer = [0; 8 * 32];
-            }
-            DrawSprite { x, y, sprite } => {
-                let first_byte = (y * 8 + (x / 8)) as usize;
-                let mut second_byte = first_byte + 1;
-
-                // Wrap around rather than going to the next row
-                if second_byte % 8 == 0 {
-                    second_byte -= 8;
-                }
-
-                for (i, byte) in sprite.into_iter().enumerate() {
-                    let bit_offset = x % 8;
-                    self.frame_buffer[first_byte + (i * 8)] ^= byte >> bit_offset;
-
-                    if let Some(lower_bits) = byte.checked_shl(u32::from(8 - bit_offset)) {
-                        self.frame_buffer[second_byte + (i * 8)] ^= lower_bits
-                    }
-                }
-            }
-        }
     }
 }
 
