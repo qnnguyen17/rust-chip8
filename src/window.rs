@@ -1,23 +1,20 @@
 extern crate piston_window;
 
 use piston_window::*;
-use std::sync::mpsc::Receiver;
+use std::sync::Arc;
+use std::sync::RwLock;
 
 const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
 const PIXEL_SCALE_FACTOR: f64 = 10.0;
 
 pub struct WindowHandler {
-    frame_buffer: [u8; 8 * 32],
-    graphics_bus_in: Receiver<[u8; 8 * 32]>,
+    frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
 }
 
 impl WindowHandler {
-    pub fn new(graphics_bus_in: Receiver<[u8; 8 * 32]>) -> WindowHandler {
-        WindowHandler {
-            frame_buffer: [0; 8 * 32],
-            graphics_bus_in,
-        }
+    pub fn new(frame_buffer: Arc<RwLock<[u8; 8 * 32]>>) -> WindowHandler {
+        WindowHandler { frame_buffer }
     }
 
     pub fn run(&mut self) {
@@ -26,21 +23,14 @@ impl WindowHandler {
             .build()
             .unwrap_or_else(|e| panic!("Failed to build PistonWindow: {}", e));
         while let Some(e) = window.next() {
-            self.update_frame_buffer();
             self.draw_frame_buffer(&mut window, &e);
-        }
-    }
-
-    fn update_frame_buffer(&mut self) {
-        while let Ok(new_screen) = self.graphics_bus_in.try_recv() {
-            self.frame_buffer = new_screen;
         }
     }
 
     fn draw_frame_buffer(&mut self, window: &mut PistonWindow, e: &Event) {
         window.draw_2d(e, |c, g| {
             clear(BLACK, g);
-            for (index, byte) in self.frame_buffer.iter().enumerate() {
+            for (index, byte) in self.frame_buffer.read().unwrap().iter().enumerate() {
                 let row = index / 8;
                 let octet_index = index % 8;
                 for bit_index in 0..8 {

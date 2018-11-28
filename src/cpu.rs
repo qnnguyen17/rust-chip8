@@ -1,7 +1,8 @@
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Result;
-use std::sync::mpsc::Sender;
+use std::sync::Arc;
+use std::sync::RwLock;
 
 use self::OpCode::*;
 use super::digits::DIGITS;
@@ -76,15 +77,11 @@ pub struct CPU {
     // State of the 16 input keys
     key: [bool; 16],
 
-    // TODO: make this a RefCell so we can share access with WindowHandler for drawing
-    frame_buffer: [u8; 8 * 32],
-
-    // Output for sending graphics instructions to the window handler
-    graphics_bus_out: Sender<[u8; 8 * 32]>,
+    frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
 }
 
 impl CPU {
-    pub fn new(graphics_bus_out: Sender<[u8; 8 * 32]>) -> CPU {
+    pub fn new(frame_buffer: Arc<RwLock<[u8; 8 * 32]>>) -> CPU {
         let mut memory = [0 as u8; 4096];
         memory[..DIGITS.len()].clone_from_slice(&DIGITS);
         CPU {
@@ -98,8 +95,7 @@ impl CPU {
             sp: 0,
             memory,
             key: [false; 16],
-            frame_buffer: [0; 8 * 32],
-            graphics_bus_out,
+            frame_buffer,
         }
     }
 
@@ -156,10 +152,10 @@ impl CPU {
             }
             Clear => {
                 println!("Clearing screen");
-                self.frame_buffer = [0; 8 * 32];
-                self.graphics_bus_out
-                    .send(self.frame_buffer)
-                    .expect("failed to send frame after clearing");
+                {
+                    let mut fb = self.frame_buffer.write().unwrap();
+                    *fb = [0; 8 * 32];
+                }
             }
             Draw {
                 reg_x,
@@ -175,9 +171,6 @@ impl CPU {
                     sprite_bytes, i, x, y
                 );
                 self.draw_sprite(i, sprite_bytes, x, y);
-                self.graphics_bus_out
-                    .send(self.frame_buffer)
-                    .expect("failed to send frame after drawing sprite");
             }
             LdIAddr { addr } => {
                 println!("Loading reg I with address {:x}", addr);
@@ -265,20 +258,22 @@ impl CPU {
 
         let mut collision = false;
 
+        let mut frame_buffer = self.frame_buffer.write().unwrap();
+
         for (i, byte) in sprite.iter().enumerate() {
             let bit_offset = x % 8;
-            let old_first_byte: u8 = self.frame_buffer[first_byte + (i * 8)];
-            let old_second_byte: u8 = self.frame_buffer[second_byte + (i * 8)];
+            let old_first_byte: u8 = frame_buffer[first_byte + (i * 8)];
+            let old_second_byte: u8 = frame_buffer[second_byte + (i * 8)];
 
-            self.frame_buffer[first_byte + (i * 8)] ^= byte >> bit_offset;
+            frame_buffer[first_byte + (i * 8)] ^= byte >> bit_offset;
 
-            let new_first_byte = self.frame_buffer[first_byte + (i * 8)];
+            let new_first_byte = frame_buffer[first_byte + (i * 8)];
 
             if let Some(lower_bits) = byte.checked_shl(u32::from(8 - bit_offset)) {
-                self.frame_buffer[second_byte + (i * 8)] ^= lower_bits
+                frame_buffer[second_byte + (i * 8)] ^= lower_bits
             }
 
-            let new_second_byte = self.frame_buffer[second_byte + (i * 8)];
+            let new_second_byte = frame_buffer[second_byte + (i * 8)];
 
             // Check if any pixel went from 1 -> 0
             for i in 0..8 {
@@ -364,7 +359,8 @@ mod tests {
     use super::decode_instruction;
     use super::OpCode::*;
     use super::CPU;
-    use std::sync::mpsc::*;
+    use std::sync::Arc;
+    use std::sync::RwLock;
 
     //
     // DECODE tests
@@ -472,7 +468,7 @@ mod tests {
     //
     #[test]
     fn execute_add_i_reg() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.v[0] = 1;
         cpu.i = 5;
         cpu.execute(AddIReg { reg: 0 });
@@ -482,7 +478,7 @@ mod tests {
 
     #[test]
     fn execute_add_reg_byte() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.v[0] = 0;
         cpu.execute(AddRegByte { reg: 0, val: 16 });
         assert_eq!(16, cpu.v[0]);
@@ -491,7 +487,7 @@ mod tests {
 
     #[test]
     fn execute_and_regs() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.v[0] = 0b111;
         cpu.v[1] = 0b101;
         cpu.execute(AndRegs { reg_x: 0, reg_y: 1 });
@@ -502,7 +498,7 @@ mod tests {
 
     #[test]
     fn execute_call() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.sp = 1;
         cpu.pc = 0x112;
         cpu.execute(Call { addr: 0x114 });
@@ -512,15 +508,17 @@ mod tests {
     }
 
     #[test]
-    fn execute_draw() {
-        // No collision
-        let (mut cpu, _receiver) = create_cpu();
+    fn execute_draw_no_collision() {
+        let mut cpu = create_cpu();
         cpu.i = 0;
         cpu.v[0] = 4;
         cpu.v[1] = 0;
         cpu.memory[0] = 0b01110111;
-        cpu.frame_buffer[0] = 0b1000;
-        cpu.frame_buffer[1] = 0b10000000;
+        {
+            let mut fb = cpu.frame_buffer.write().unwrap();
+            fb[0] = 0b1000;
+            fb[1] = 0b10000000;
+        }
 
         cpu.execute(Draw {
             reg_x: 0,
@@ -528,19 +526,28 @@ mod tests {
             sprite_bytes: 1,
         });
 
-        assert_eq!(0xF, cpu.frame_buffer[0]);
-        assert_eq!(0xF0, cpu.frame_buffer[1]);
-        assert_eq!(0, cpu.v[0xF]);
-        assert_eq!(0x202, cpu.pc);
+        {
+            let fb = cpu.frame_buffer.read().unwrap();
+            assert_eq!(0xF, fb[0]);
+            assert_eq!(0xF0, fb[1]);
+            assert_eq!(0, cpu.v[0xF]);
+            assert_eq!(0x202, cpu.pc);
+        }
+    }
 
-        // Collision
-        let (mut cpu, _receiver) = create_cpu();
+    #[test]
+    fn execute_draw_collision() {
+        let mut cpu = create_cpu();
         cpu.i = 0;
         cpu.v[0] = 4;
         cpu.v[1] = 1;
         cpu.memory[0] = 0b01110111;
-        cpu.frame_buffer[8] = 0xF;
-        cpu.frame_buffer[9] = 0xF0;
+
+        {
+            let mut fb = cpu.frame_buffer.write().unwrap();
+            fb[8] = 0xF;
+            fb[9] = 0xF0;
+        }
 
         cpu.execute(Draw {
             reg_x: 0,
@@ -548,34 +555,47 @@ mod tests {
             sprite_bytes: 1,
         });
 
-        assert_eq!(0x8, cpu.frame_buffer[8]);
-        assert_eq!(0x80, cpu.frame_buffer[9]);
-        assert_eq!(1, cpu.v[0xF]);
-        assert_eq!(0x202, cpu.pc);
+        {
+            let fb = cpu.frame_buffer.read().unwrap();
+            assert_eq!(0x8, fb[8]);
+            assert_eq!(0x80, fb[9]);
+            assert_eq!(1, cpu.v[0xF]);
+            assert_eq!(0x202, cpu.pc);
+        }
+    }
 
-        // Wrap around
-        let (mut cpu, _reciever) = create_cpu();
+    #[test]
+    fn execute_draw_wraparound() {
+        let mut cpu = create_cpu();
         cpu.i = 0;
         cpu.v[0] = 60;
         cpu.v[1] = 0;
         cpu.memory[0] = 0xFF;
-        cpu.frame_buffer[0] = 0x80;
-        cpu.frame_buffer[7] = 0x1;
+
+        {
+            let mut fb = cpu.frame_buffer.write().unwrap();
+            fb[0] = 0x80;
+            fb[7] = 0x1;
+        }
 
         cpu.execute(Draw {
             reg_x: 0,
             reg_y: 1,
             sprite_bytes: 1,
         });
-        assert_eq!(0b1110, cpu.frame_buffer[7]);
-        assert_eq!(0b01110000, cpu.frame_buffer[0]);
-        assert_eq!(1, cpu.v[0xF]);
-        assert_eq!(0x202, cpu.pc);
+
+        {
+            let fb = cpu.frame_buffer.read().unwrap();
+            assert_eq!(0b1110, fb[7]);
+            assert_eq!(0b01110000, fb[0]);
+            assert_eq!(1, cpu.v[0xF]);
+            assert_eq!(0x202, cpu.pc);
+        }
     }
 
     #[test]
     fn execute_ld_i_addr() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.execute(LdIAddr { addr: 0x123 });
         assert_eq!(0x123, cpu.i);
         assert_eq!(0x202, cpu.pc);
@@ -583,7 +603,7 @@ mod tests {
 
     #[test]
     fn execute_ld_i_digit_reg() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.v[1] = 2;
         cpu.execute(LdIDigitReg { reg: 1 });
         assert_eq!(10, cpu.i);
@@ -592,7 +612,7 @@ mod tests {
 
     #[test]
     fn execute_mem_i_regs() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.i = 0x100;
         cpu.v[0] = 5;
         cpu.v[1] = 6;
@@ -604,7 +624,7 @@ mod tests {
 
     #[test]
     fn execute_ld_reg_byte() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.execute(LdRegByte { reg: 1, val: 0xFF });
         assert_eq!(0xFF, cpu.v[1]);
         assert_eq!(0x202, cpu.pc);
@@ -612,7 +632,7 @@ mod tests {
 
     #[test]
     fn execute_ld_regs_mem_i() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.i = 0x100;
         cpu.memory[0x100] = 1;
         cpu.memory[0x101] = 2;
@@ -626,14 +646,14 @@ mod tests {
 
     #[test]
     fn execute_jump() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.execute(Jump { addr: 0x2e8 });
         assert_eq!(0x2e8, cpu.pc);
     }
 
     #[test]
     fn execute_ret() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.sp = 1;
         cpu.stack[0] = 0x200;
         cpu.execute(Ret);
@@ -643,12 +663,12 @@ mod tests {
 
     #[test]
     fn execute_skip_eq_reg_bytes() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.v[4] = 16;
         cpu.execute(SkipEqRegBytes { reg: 4, val: 16 });
         assert_eq!(0x204, cpu.pc);
 
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.v[4] = 14;
         cpu.execute(SkipEqRegBytes { reg: 4, val: 16 });
         assert_eq!(0x202, cpu.pc);
@@ -656,19 +676,19 @@ mod tests {
 
     #[test]
     fn execute_skip_neq_reg_bytes() {
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.v[4] = 16;
         cpu.execute(SkipNEqRegBytes { reg: 4, val: 16 });
         assert_eq!(0x202, cpu.pc);
 
-        let (mut cpu, _) = create_cpu();
+        let mut cpu = create_cpu();
         cpu.v[4] = 14;
         cpu.execute(SkipNEqRegBytes { reg: 4, val: 16 });
         assert_eq!(0x204, cpu.pc);
     }
 
-    fn create_cpu() -> (CPU, Receiver<[u8; 8 * 32]>) {
-        let (sender, receiver) = channel();
-        (CPU::new(sender), receiver)
+    fn create_cpu() -> CPU {
+        let frame_buffer = Arc::new(RwLock::new([0; 8 * 32]));
+        CPU::new(frame_buffer)
     }
 }
