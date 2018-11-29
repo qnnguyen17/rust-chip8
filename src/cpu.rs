@@ -35,6 +35,9 @@ enum OpCode {
     LdIDigitReg {
         reg: u8,
     },
+    LdMemIBcdReg {
+        reg: u8,
+    },
     LdMemIRegs {
         last_reg: u8,
     },
@@ -185,6 +188,16 @@ impl CPU {
                 );
                 self.i = addr;
             }
+            LdMemIBcdReg { reg } => {
+                let reg_val = self.get_reg_val(reg);
+                let hundreds = reg_val / 100;
+                let tens = reg_val / 10 % 10;
+                let ones = reg_val % 10;
+                let i = self.i as usize;
+                self.memory[i] = hundreds;
+                self.memory[i + 1] = tens;
+                self.memory[i + 2] = ones;
+            }
             LdMemIRegs { last_reg } => {
                 println!(
                     "Copying regs 0 through {} into memory address {:x}",
@@ -334,6 +347,7 @@ fn decode_instruction(code: &[u8]) -> OpCode {
         },
         [msb @ 0xF0...0xFF, 0x1E] => AddIReg { reg: msb & 0xF },
         [msb @ 0xF0...0xFF, 0x29] => LdIDigitReg { reg: msb & 0xF },
+        [msb @ 0xF0...0xFF, 0x33] => LdMemIBcdReg { reg: msb & 0xF },
         [msb @ 0xF0...0xFF, 0x55] => LdMemIRegs {
             last_reg: msb & 0x0F,
         },
@@ -411,6 +425,11 @@ mod tests {
     #[test]
     fn decode_ld_i_digit_reg() {
         assert_eq!(LdIDigitReg { reg: 0 }, decode_instruction(&[0xF0, 0x29]));
+    }
+
+    #[test]
+    fn decode_ld_mem_i_bcd_reg() {
+        assert_eq!(LdMemIBcdReg { reg: 5 }, decode_instruction(&[0xF5, 0x33]));
     }
 
     #[test]
@@ -611,7 +630,19 @@ mod tests {
     }
 
     #[test]
-    fn execute_mem_i_regs() {
+    fn execute_ld_mem_i_bcd_reg() {
+        let mut cpu = create_cpu();
+        cpu.v[5] = 254;
+        cpu.i = 200;
+        cpu.execute(LdMemIBcdReg { reg: 5 });
+        assert_eq!(2, cpu.memory[200]);
+        assert_eq!(5, cpu.memory[201]);
+        assert_eq!(4, cpu.memory[202]);
+        assert_eq!(0x202, cpu.pc);
+    }
+
+    #[test]
+    fn execute_ld_mem_i_regs() {
         let mut cpu = create_cpu();
         cpu.i = 0x100;
         cpu.v[0] = 5;
