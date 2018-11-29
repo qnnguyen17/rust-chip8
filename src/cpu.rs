@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Result;
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -81,10 +82,17 @@ pub struct CPU {
     key: [bool; 16],
 
     frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
+
+    // Allows the CPU to be notified when the emulator window is closed, so it can complete as
+    // well.
+    window_closed_receiver: Receiver<bool>,
 }
 
 impl CPU {
-    pub fn new(frame_buffer: Arc<RwLock<[u8; 8 * 32]>>) -> CPU {
+    pub fn new(
+        frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
+        window_closed_receiver: Receiver<bool>,
+    ) -> CPU {
         let mut memory = [0 as u8; 4096];
         memory[..DIGITS.len()].clone_from_slice(&DIGITS);
         CPU {
@@ -99,6 +107,7 @@ impl CPU {
             memory,
             key: [false; 16],
             frame_buffer,
+            window_closed_receiver,
         }
     }
 
@@ -110,6 +119,10 @@ impl CPU {
 
     pub fn run(&mut self) {
         loop {
+            if let Ok(true) = self.window_closed_receiver.try_recv() {
+                break;
+            }
+
             let pc = self.pc as usize;
             let code = &self.memory[pc..pc + 2];
             let instr = decode_instruction(&code);

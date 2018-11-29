@@ -3,6 +3,7 @@ mod digits;
 mod window;
 
 use std::env;
+use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
@@ -18,11 +19,12 @@ fn main() {
     let frame_buffer_1 = Arc::new(RwLock::new([0; 8 * 32]));
     let frame_buffer_2 = frame_buffer_1.clone();
 
-    // TODO: gracefully handle failure/abort
+    let (window_closed_sender, window_closed_receiver) = channel();
+
     let window_thread = thread::Builder::new()
         .name("window".to_string())
         .spawn(move || {
-            let mut window = window::WindowHandler::new(frame_buffer_1);
+            let mut window = window::WindowHandler::new(frame_buffer_1, window_closed_sender);
             window.run();
         })
         .expect("failed to spawn window thread");
@@ -30,7 +32,7 @@ fn main() {
     let processor_thread = thread::Builder::new()
         .name("processor".to_string())
         .spawn(move || {
-            let mut processor = cpu::CPU::new(frame_buffer_2);
+            let mut processor = cpu::CPU::new(frame_buffer_2, window_closed_receiver);
             processor.load_game_data(&filename).unwrap();
             processor.run();
         })

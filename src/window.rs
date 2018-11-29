@@ -1,6 +1,7 @@
 extern crate piston_window;
 
 use piston_window::*;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -10,21 +11,31 @@ const PIXEL_SCALE_FACTOR: f64 = 10.0;
 
 pub struct WindowHandler {
     frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
+    // Sender to notify other threads that the window is closed
+    closed_sender: Sender<bool>,
 }
 
 impl WindowHandler {
-    pub fn new(frame_buffer: Arc<RwLock<[u8; 8 * 32]>>) -> WindowHandler {
-        WindowHandler { frame_buffer }
+    pub fn new(
+        frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
+        closed_sender: Sender<bool>,
+    ) -> WindowHandler {
+        WindowHandler {
+            frame_buffer,
+            closed_sender,
+        }
     }
 
     pub fn run(&mut self) {
         let mut window: PistonWindow = WindowSettings::new("Chip8", (640, 320))
             .exit_on_esc(false)
+            .resizable(false)
             .build()
             .unwrap_or_else(|e| panic!("Failed to build PistonWindow: {}", e));
         while let Some(e) = window.next() {
             self.draw_frame_buffer(&mut window, &e);
         }
+        self.closed_sender.send(true);
     }
 
     fn draw_frame_buffer(&mut self, window: &mut PistonWindow, e: &Event) {
