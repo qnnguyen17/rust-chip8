@@ -1,3 +1,6 @@
+extern crate piston_window;
+
+use piston_window::*;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Result;
@@ -46,8 +49,15 @@ enum OpCode {
         reg: u8,
         val: u8,
     },
+    LdRegKey {
+        reg: u8,
+    },
     LdRegsMemI {
         last_reg: u8,
+    },
+    LdRegReg {
+        reg_x: u8,
+        reg_y: u8,
     },
     Jump {
         addr: u16,
@@ -60,6 +70,9 @@ enum OpCode {
     SkipNEqRegBytes {
         reg: u8,
         val: u8,
+    },
+    ShiftRightReg {
+        reg: u8,
     },
     Sys,
 }
@@ -79,19 +92,21 @@ pub struct CPU {
     // Address space
     memory: [u8; 4096],
     // State of the 16 input keys
-    key: [bool; 16],
+    key_state: [bool; 16],
 
     frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
 
     // Allows the CPU to be notified when the emulator window is closed, so it can complete as
     // well.
     window_closed_receiver: Receiver<bool>,
+    key_event_receiver: Receiver<Event>,
 }
 
 impl CPU {
     pub fn new(
         frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
         window_closed_receiver: Receiver<bool>,
+        key_event_receiver: Receiver<Event>,
     ) -> CPU {
         let mut memory = [0 as u8; 4096];
         memory[..DIGITS.len()].clone_from_slice(&DIGITS);
@@ -105,9 +120,10 @@ impl CPU {
             stack: [0; 16],
             sp: 0,
             memory,
-            key: [false; 16],
+            key_state: [false; 16],
             frame_buffer,
             window_closed_receiver,
+            key_event_receiver,
         }
     }
 
@@ -123,10 +139,27 @@ impl CPU {
                 break;
             }
 
+            self.update_key_state();
+
             let pc = self.pc as usize;
             let code = &self.memory[pc..pc + 2];
             let instr = decode_instruction(&code);
             self.execute(instr);
+        }
+    }
+
+    fn update_key_state(&mut self) {
+        while let Ok(event) = self.key_event_receiver.try_recv() {
+            event.press(|button| {
+                if let Some(keycode) = get_keycode(button) {
+                    self.key_state[keycode as usize] = true;
+                }
+            });
+            event.release(|button| {
+                if let Some(keycode) = get_keycode(button) {
+                    self.key_state[keycode as usize] = false;
+                }
+            });
         }
     }
 
@@ -135,30 +168,30 @@ impl CPU {
         match op {
             AddIReg { reg } => {
                 let reg_val = self.get_reg_val(reg);
-                println!(
+                info!(
                     "Adding {:x} from reg V{} to I's current value {:x}",
                     reg_val, reg, self.i
                 );
                 self.i += u16::from(reg_val);
             }
             AddRegByte { reg, val } => {
-                println!(
+                info!(
                     "Adding val {:x} to register V{} to get value: {}",
                     val,
                     reg,
-                    self.get_reg_val(reg) + val
+                    self.get_reg_val(reg).wrapping_add(val),
                 );
-                self.v[reg as usize] += val;
+                self.v[reg as usize] = self.get_reg_val(reg).wrapping_add(val);
             }
             AndRegs { reg_x, reg_y } => {
-                println!(
+                info!(
                     "AND-ing register V{} and V{}, storing value in V{}",
                     reg_x, reg_y, reg_x
                 );
                 self.v[reg_x as usize] &= self.get_reg_val(reg_y);
             }
             Call { addr } => {
-                println!(
+                info!(
                     "Storing current PC {:x} on the stack and jumping to {:x}",
                     self.pc, addr
                 );
@@ -167,7 +200,7 @@ impl CPU {
                 new_pc = addr;
             }
             Clear => {
-                println!("Clearing screen");
+                info!("Clearing screen");
                 {
                     let mut fb = self.frame_buffer.write().unwrap();
                     *fb = [0; 8 * 32];
@@ -182,20 +215,20 @@ impl CPU {
                 let sprite_bytes = sprite_bytes as usize;
                 let x = self.get_reg_val(reg_x);
                 let y = self.get_reg_val(reg_y);
-                println!(
+                info!(
                     "Drawing {} bytes of sprite from address {:x} at location {},{} on the screen",
                     sprite_bytes, i, x, y
                 );
                 self.draw_sprite(i, sprite_bytes, x, y);
             }
             LdIAddr { addr } => {
-                println!("Loading reg I with address {:x}", addr);
+                info!("Loading reg I with address {:x}", addr);
                 self.i = addr;
             }
             LdIDigitReg { reg } => {
                 let sprite_digit = self.get_reg_val(reg);
                 let addr = 5 * u16::from(sprite_digit);
-                println!(
+                info!(
                     "Loading I with address {:x} from V{}, where sprite digit {:x} is stored",
                     addr, reg, sprite_digit
                 );
@@ -212,20 +245,39 @@ impl CPU {
                 self.memory[i + 2] = ones;
             }
             LdMemIRegs { last_reg } => {
-                println!(
+                info!(
                     "Copying regs 0 through {} into memory address {:x}",
-                    last_reg, self.pc
+                    last_reg, self.i
                 );
                 for i in 0..=last_reg {
                     self.memory[(self.i + u16::from(i)) as usize] = self.get_reg_val(i);
                 }
             }
             LdRegByte { reg, val } => {
-                println!("Loading reg V{} with value {:x}", reg, val);
+                info!("Loading reg V{} with value {:x}", reg, val);
                 self.v[reg as usize] = val;
             }
+            LdRegKey { reg } => {
+                while let Ok(event) = self.key_event_receiver.recv() {
+                    if let Some(true) = event.press(|button| {
+                        if let Some(keycode) = get_keycode(button) {
+                            self.key_state[keycode as usize] = true;
+                            self.v[reg as usize] = keycode;
+                            return true;
+                        }
+                        return false;
+                    }) {
+                        break;
+                    }
+                    event.release(|button| {
+                        if let Some(keycode) = get_keycode(button) {
+                            self.key_state[keycode as usize] = false;
+                        }
+                    });
+                }
+            }
             LdRegsMemI { last_reg } => {
-                println!(
+                info!(
                     "Loading regs 0 through {} with data in memory starting at address {:x}",
                     last_reg, self.i
                 );
@@ -233,18 +285,28 @@ impl CPU {
                     self.v[i] = self.memory[self.i as usize + i]
                 }
             }
+            LdRegReg { reg_x, reg_y } => {
+                info!(
+                    "Setting the value of V{} to {}(V{})",
+                    reg_x,
+                    self.get_reg_val(reg_y),
+                    reg_y
+                );
+                self.v[reg_x as usize] = self.get_reg_val(reg_y);
+            }
             Jump { addr } => {
-                println!("Jumping to address {:x} instead of {:x}", addr, new_pc);
+                info!("Jumping to address {:x} instead of {:x}", addr, new_pc);
                 new_pc = addr;
             }
             Ret => {
                 self.sp -= 1;
+                info!("returning to address {:x}", self.stack[self.sp as usize]);
                 new_pc = self.stack[self.sp as usize];
             }
             SkipEqRegBytes { reg, val } => {
                 let reg_val = self.get_reg_val(reg);
                 if reg_val == val {
-                    println!(
+                    info!(
                         "Skipping next instr because {}(V{}) == {}",
                         reg_val, reg, val
                     );
@@ -254,14 +316,19 @@ impl CPU {
             SkipNEqRegBytes { reg, val } => {
                 let reg_val = self.get_reg_val(reg);
                 if reg_val != val {
-                    println!(
+                    info!(
                         "Skipping next instr because {}(V{}) != {}",
                         reg_val, reg, val
                     );
                     new_pc += 2;
                 }
             }
-            Sys => println!("SYS instruction found, ignoring"),
+            ShiftRightReg { reg } => {
+                info!("Shifting-right V{} value: {:x}", reg, self.get_reg_val(reg));
+                self.v[0xF] = self.get_reg_val(reg) & 1;
+                self.v[reg as usize] >>= 1;
+            }
+            Sys => info!("SYS instruction found, ignoring"),
         }
 
         self.pc = new_pc;
@@ -346,18 +413,30 @@ fn decode_instruction(code: &[u8]) -> OpCode {
             reg: msb & 0xF,
             val: *lsb,
         },
-        [msb @ 0x80...0x8F, lsb @ 0x02...0xF2] => AndRegs {
-            reg_x: msb & 0xF,
-            reg_y: (lsb & 0xF0) >> 4,
+        [msb @ 0x80...0x8F, lsb] => match lsb & 0xF {
+            0x0 => LdRegReg {
+                reg_x: msb & 0xF,
+                reg_y: extract_upper_nibble(*lsb),
+            },
+            0x2 => AndRegs {
+                reg_x: msb & 0xF,
+                reg_y: extract_upper_nibble(*lsb),
+            },
+            0x6 => ShiftRightReg { reg: msb & 0xF },
+            _ => panic!(
+                "Unknown op code {:x}",
+                *lsb as usize | ((*msb as usize) << 8)
+            ),
         },
         [msb @ 0xA0...0xAF, lsb] => LdIAddr {
             addr: extract_addr(*msb, *lsb),
         },
         [msb @ 0xD0...0xDF, lsb] => Draw {
             reg_x: msb & 0xF,
-            reg_y: (lsb & 0xF0) >> 4,
+            reg_y: extract_upper_nibble(*lsb),
             sprite_bytes: lsb & 0xF,
         },
+        [msb @ 0xF0...0xFF, 0x0A] => LdRegKey { reg: msb & 0xF },
         [msb @ 0xF0...0xFF, 0x1E] => AddIReg { reg: msb & 0xF },
         [msb @ 0xF0...0xFF, 0x29] => LdIDigitReg { reg: msb & 0xF },
         [msb @ 0xF0...0xFF, 0x33] => LdMemIBcdReg { reg: msb & 0xF },
@@ -381,11 +460,40 @@ fn extract_addr(msb: u8, lsb: u8) -> u16 {
     u16::from(lsb) | ((u16::from(msb) & 0x0F) << 8)
 }
 
+// Extracts the most significant 4 bits
+fn extract_upper_nibble(byte: u8) -> u8 {
+    (byte & 0xF0) >> 4
+}
+
+// Returns keycode 0 -> F of the button if there is one
+fn get_keycode(button: Button) -> Option<u8> {
+    match button {
+        Button::Keyboard(Key::D0) => Some(0),
+        Button::Keyboard(Key::D1) => Some(1),
+        Button::Keyboard(Key::D2) => Some(2),
+        Button::Keyboard(Key::D3) => Some(3),
+        Button::Keyboard(Key::D4) => Some(4),
+        Button::Keyboard(Key::D5) => Some(5),
+        Button::Keyboard(Key::D6) => Some(6),
+        Button::Keyboard(Key::D7) => Some(7),
+        Button::Keyboard(Key::D8) => Some(8),
+        Button::Keyboard(Key::D9) => Some(9),
+        Button::Keyboard(Key::A) => Some(0xA),
+        Button::Keyboard(Key::B) => Some(0xB),
+        Button::Keyboard(Key::C) => Some(0xC),
+        Button::Keyboard(Key::D) => Some(0xD),
+        Button::Keyboard(Key::E) => Some(0xE),
+        Button::Keyboard(Key::F) => Some(0xF),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::decode_instruction;
     use super::OpCode::*;
     use super::CPU;
+    use std::sync::mpsc::channel;
     use std::sync::Arc;
     use std::sync::RwLock;
 
@@ -462,10 +570,23 @@ mod tests {
     }
 
     #[test]
+    fn decode_ld_reg_key() {
+        assert_eq!(LdRegKey { reg: 5 }, decode_instruction(&[0xF5, 0x0A]));
+    }
+
+    #[test]
     fn decode_ld_regs_mem_i() {
         assert_eq!(
             LdRegsMemI { last_reg: 4 },
             decode_instruction(&[0xF4, 0x65])
+        );
+    }
+
+    #[test]
+    fn decode_ld_reg_reg() {
+        assert_eq!(
+            LdRegReg { reg_x: 0, reg_y: 1 },
+            decode_instruction(&[0x80, 0x10])
         );
     }
 
@@ -493,6 +614,11 @@ mod tests {
             SkipNEqRegBytes { reg: 0, val: 0x16 },
             decode_instruction(&[0x40, 0x16])
         );
+    }
+
+    #[test]
+    fn decode_shift_right_reg() {
+        assert_eq!(ShiftRightReg { reg: 0 }, decode_instruction(&[0x80, 0x66]));
     }
 
     //
@@ -545,6 +671,7 @@ mod tests {
         cpu.i = 0;
         cpu.v[0] = 4;
         cpu.v[1] = 0;
+        cpu.v[0xF] = 1;
         cpu.memory[0] = 0b01110111;
         {
             let mut fb = cpu.frame_buffer.write().unwrap();
@@ -573,6 +700,7 @@ mod tests {
         cpu.i = 0;
         cpu.v[0] = 4;
         cpu.v[1] = 1;
+        cpu.v[0xF] = 0;
         cpu.memory[0] = 0b01110111;
 
         {
@@ -602,6 +730,7 @@ mod tests {
         cpu.i = 0;
         cpu.v[0] = 60;
         cpu.v[1] = 0;
+        cpu.v[0xF] = 0;
         cpu.memory[0] = 0xFF;
 
         {
@@ -689,6 +818,17 @@ mod tests {
     }
 
     #[test]
+    fn execute_ld_reg_reg() {
+        let mut cpu = create_cpu();
+        cpu.v[0] = 5;
+        cpu.v[1] = 6;
+        cpu.execute(LdRegReg { reg_x: 0, reg_y: 1 });
+        assert_eq!(6, cpu.v[0]);
+        assert_eq!(6, cpu.v[1]);
+        assert_eq!(0x202, cpu.pc);
+    }
+
+    #[test]
     fn execute_jump() {
         let mut cpu = create_cpu();
         cpu.execute(Jump { addr: 0x2e8 });
@@ -731,8 +871,29 @@ mod tests {
         assert_eq!(0x204, cpu.pc);
     }
 
+    #[test]
+    fn execute_shift_right_reg_unset_vf() {
+        let mut cpu = create_cpu();
+        cpu.v[0] = 0b110;
+        cpu.v[0xF] = 1;
+        cpu.execute(ShiftRightReg { reg: 0 });
+        assert_eq!(0b11, cpu.v[0]);
+        assert_eq!(0, cpu.v[0xF]);
+        assert_eq!(0x202, cpu.pc);
+    }
+
+    #[test]
+    fn execute_shift_right_reg_set_vf() {
+        let mut cpu = create_cpu();
+        cpu.v[0] = 0b1111;
+        cpu.execute(ShiftRightReg { reg: 0 });
+        assert_eq!(0b111, cpu.v[0]);
+        assert_eq!(1, cpu.v[0xF]);
+        assert_eq!(0x202, cpu.pc);
+    }
+
     fn create_cpu() -> CPU {
         let frame_buffer = Arc::new(RwLock::new([0; 8 * 32]));
-        CPU::new(frame_buffer)
+        CPU::new(frame_buffer, channel().1, channel().1)
     }
 }

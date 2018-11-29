@@ -13,16 +13,19 @@ pub struct WindowHandler {
     frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
     // Sender to notify other threads that the window is closed
     closed_sender: Sender<bool>,
+    key_event_sender: Sender<Event>,
 }
 
 impl WindowHandler {
     pub fn new(
         frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
         closed_sender: Sender<bool>,
+        key_event_sender: Sender<Event>,
     ) -> WindowHandler {
         WindowHandler {
             frame_buffer,
             closed_sender,
+            key_event_sender,
         }
     }
 
@@ -34,8 +37,11 @@ impl WindowHandler {
             .unwrap_or_else(|e| panic!("Failed to build PistonWindow: {}", e));
         while let Some(e) = window.next() {
             self.draw_frame_buffer(&mut window, &e);
+            self.handle_key_event(&e);
         }
-        self.closed_sender.send(true);
+        self.closed_sender
+            .send(true)
+            .expect("unable to send window-closed message");
     }
 
     fn draw_frame_buffer(&mut self, window: &mut PistonWindow, e: &Event) {
@@ -58,6 +64,19 @@ impl WindowHandler {
                     }
                 }
             }
+        });
+    }
+
+    fn handle_key_event(&mut self, e: &Event) {
+        e.press(|_| {
+            self.key_event_sender
+                .send(e.clone())
+                .expect("unable to send key press event");
+        });
+        e.release(|_| {
+            self.key_event_sender
+                .send(e.clone())
+                .expect("unable to send key release event");
         });
     }
 }

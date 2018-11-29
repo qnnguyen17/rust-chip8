@@ -6,3 +6,5 @@ edition = "2018"
 
 [dependencies]
 piston_window = "0.81.0"
+log = "0.4"
+env_logger = "0.6.0"

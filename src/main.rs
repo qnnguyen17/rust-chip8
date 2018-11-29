@@ -1,6 +1,9 @@
 mod cpu;
 mod digits;
 mod window;
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 
 use std::env;
 use std::sync::mpsc::channel;
@@ -9,6 +12,7 @@ use std::sync::RwLock;
 use std::thread;
 
 fn main() {
+    env_logger::init();
     let args: Vec<String> = env::args().collect();
     let filename = if args.len() > 1 {
         args[1].clone()
@@ -20,11 +24,13 @@ fn main() {
     let frame_buffer_2 = frame_buffer_1.clone();
 
     let (window_closed_sender, window_closed_receiver) = channel();
+    let (key_event_sender, key_event_receiver) = channel();
 
     let window_thread = thread::Builder::new()
         .name("window".to_string())
         .spawn(move || {
-            let mut window = window::WindowHandler::new(frame_buffer_1, window_closed_sender);
+            let mut window =
+                window::WindowHandler::new(frame_buffer_1, window_closed_sender, key_event_sender);
             window.run();
         })
         .expect("failed to spawn window thread");
@@ -32,7 +38,8 @@ fn main() {
     let processor_thread = thread::Builder::new()
         .name("processor".to_string())
         .spawn(move || {
-            let mut processor = cpu::CPU::new(frame_buffer_2, window_closed_receiver);
+            let mut processor =
+                cpu::CPU::new(frame_buffer_2, window_closed_receiver, key_event_receiver);
             processor.load_game_data(&filename).unwrap();
             processor.run();
         })
