@@ -246,12 +246,15 @@ impl CPU {
             }
             LdMemIRegs { last_reg } => {
                 info!(
-                    "Copying regs 0 through {} into memory address {:x}",
-                    last_reg, self.i
+                    "Copying regs 0 through {} into memory address {:x} and incrementing I by {}",
+                    last_reg,
+                    self.i,
+                    last_reg + 1
                 );
                 for i in 0..=last_reg {
                     self.memory[(self.i + u16::from(i)) as usize] = self.get_reg_val(i);
                 }
+                self.i += u16::from(last_reg) + 1;
             }
             LdRegByte { reg, val } => {
                 info!("Loading reg V{} with value {:x}", reg, val);
@@ -278,12 +281,13 @@ impl CPU {
             }
             LdRegsMemI { last_reg } => {
                 info!(
-                    "Loading regs 0 through {} with data in memory starting at address {:x}",
-                    last_reg, self.i
+                    "Loading regs 0 through {} with data in memory starting at address {:x} and incrementing I by {}",
+                    last_reg, self.i, last_reg + 1
                 );
                 for i in 0..=last_reg as usize {
                     self.v[i] = self.memory[self.i as usize + i]
                 }
+                self.i += u16::from(last_reg) + 1;
             }
             LdRegReg { reg_x, reg_y } => {
                 info!(
@@ -301,7 +305,7 @@ impl CPU {
             Ret => {
                 self.sp -= 1;
                 info!("returning to address {:x}", self.stack[self.sp as usize]);
-                new_pc = self.stack[self.sp as usize];
+                new_pc = self.stack[self.sp as usize] + 2;
             }
             SkipEqRegBytes { reg, val } => {
                 let reg_val = self.get_reg_val(reg);
@@ -792,6 +796,7 @@ mod tests {
         cpu.execute(LdMemIRegs { last_reg: 1 });
         assert_eq!(5, cpu.memory[0x100]);
         assert_eq!(6, cpu.memory[0x101]);
+        assert_eq!(0x102, cpu.i);
         assert_eq!(0x202, cpu.pc);
     }
 
@@ -814,6 +819,7 @@ mod tests {
         assert_eq!(1, cpu.v[0]);
         assert_eq!(2, cpu.v[1]);
         assert_eq!(3, cpu.v[2]);
+        assert_eq!(0x103, cpu.i);
         assert_eq!(0x202, cpu.pc);
     }
 
@@ -841,7 +847,7 @@ mod tests {
         cpu.sp = 1;
         cpu.stack[0] = 0x200;
         cpu.execute(Ret);
-        assert_eq!(0x200, cpu.pc);
+        assert_eq!(0x202, cpu.pc);
         assert_eq!(0, cpu.sp);
     }
 
