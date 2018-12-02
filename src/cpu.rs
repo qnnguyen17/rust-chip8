@@ -1,6 +1,9 @@
 extern crate piston_window;
+extern crate rand;
 
 use piston_window::*;
+use rand::prelude::*;
+use rand::rngs::mock::StepRng;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Result;
@@ -62,6 +65,10 @@ enum OpCode {
     Jump {
         addr: u16,
     },
+    RandRegByte {
+        reg: u8,
+        val: u8,
+    },
     Ret,
     SkipEqRegBytes {
         reg: u8,
@@ -96,10 +103,29 @@ pub struct CPU {
 
     frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
 
+    // Random number generator used for Rand operations
+    rng: WrappedRng,
+
     // Allows the CPU to be notified when the emulator window is closed, so it can complete as
     // well.
     window_closed_receiver: Receiver<bool>,
     key_event_receiver: Receiver<Event>,
+}
+
+enum WrappedRng {
+    // Used for normal operation
+    Standard(ThreadRng),
+    // Used for testing
+    Mock(StepRng),
+}
+
+impl WrappedRng {
+    fn gen_byte(&mut self) -> u8 {
+        match self {
+            WrappedRng::Standard(rng) => rng.gen(),
+            WrappedRng::Mock(rng) => rng.gen(),
+        }
+    }
 }
 
 impl CPU {
@@ -122,6 +148,7 @@ impl CPU {
             memory,
             key_state: [false; 16],
             frame_buffer,
+            rng: WrappedRng::Standard(thread_rng()),
             window_closed_receiver,
             key_event_receiver,
         }
@@ -302,6 +329,14 @@ impl CPU {
                 info!("Jumping to address {:x} instead of {:x}", addr, new_pc);
                 new_pc = addr;
             }
+            RandRegByte { reg, val } => {
+                info!(
+                    "Generating a random byte, AND-ing with {:x}, and storing in V{}",
+                    val, reg
+                );
+                let rand_val = self.rng.gen_byte();
+                self.v[reg as usize] = val & rand_val;
+            }
             Ret => {
                 self.sp -= 1;
                 info!("returning to address {:x}", self.stack[self.sp as usize]);
@@ -435,6 +470,10 @@ fn decode_instruction(code: &[u8]) -> OpCode {
         [msb @ 0xA0...0xAF, lsb] => LdIAddr {
             addr: extract_addr(*msb, *lsb),
         },
+        [msb @ 0xC0...0xCF, lsb] => RandRegByte {
+            reg: msb & 0xF,
+            val: *lsb,
+        },
         [msb @ 0xD0...0xDF, lsb] => Draw {
             reg_x: msb & 0xF,
             reg_y: extract_upper_nibble(*lsb),
@@ -496,7 +535,9 @@ fn get_keycode(button: Button) -> Option<u8> {
 mod tests {
     use super::decode_instruction;
     use super::OpCode::*;
+    use super::WrappedRng;
     use super::CPU;
+    use rand::rngs::mock::StepRng;
     use std::sync::mpsc::channel;
     use std::sync::Arc;
     use std::sync::RwLock;
@@ -536,7 +577,7 @@ mod tests {
             Draw {
                 reg_x: 6,
                 reg_y: 7,
-                sprite_bytes: 5
+                sprite_bytes: 5,
             },
             decode_instruction(&[0xD6, 0x75])
         );
@@ -597,6 +638,14 @@ mod tests {
     #[test]
     fn decode_jump() {
         assert_eq!(Jump { addr: 0x500 }, decode_instruction(&[0x15, 0x00]));
+    }
+
+    #[test]
+    fn decode_rand_reg_byte() {
+        assert_eq!(
+            RandRegByte { reg: 5, val: 0x15 },
+            decode_instruction(&[0xC5, 0x15])
+        );
     }
 
     #[test]
@@ -839,6 +888,16 @@ mod tests {
         let mut cpu = create_cpu();
         cpu.execute(Jump { addr: 0x2e8 });
         assert_eq!(0x2e8, cpu.pc);
+    }
+
+    #[test]
+    fn execute_rand_reg_byte() {
+        let mut cpu = create_cpu();
+        // The CPU's RNG will always yield 0xF
+        cpu.rng = WrappedRng::Mock(StepRng::new(0xF, 0));
+        cpu.execute(RandRegByte { reg: 3, val: 0xAB });
+        assert_eq!(0xB, cpu.v[3]);
+        assert_eq!(0x202, cpu.pc);
     }
 
     #[test]
