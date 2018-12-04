@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
 
+const FRAME_BUFFER_BYTES: usize = 8 * 32;
+
 fn main() {
     env_logger::init();
     let args: Vec<String> = env::args().collect();
@@ -20,7 +22,7 @@ fn main() {
         String::from("BRIX")
     };
 
-    let frame_buffer_1 = Arc::new(RwLock::new([0; 8 * 32]));
+    let frame_buffer_1 = Arc::new(RwLock::new([0; FRAME_BUFFER_BYTES]));
     let frame_buffer_2 = frame_buffer_1.clone();
 
     let (window_closed_sender, window_closed_receiver) = channel();

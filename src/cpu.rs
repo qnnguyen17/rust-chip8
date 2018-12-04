@@ -13,6 +13,7 @@ use std::sync::RwLock;
 
 use self::OpCode::*;
 use super::digits::DIGITS;
+use super::FRAME_BUFFER_BYTES;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum OpCode {
@@ -105,7 +106,7 @@ pub struct CPU {
     // State of the 16 input keys
     key_state: [bool; 16],
 
-    frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
+    frame_buffer: Arc<RwLock<[u8; FRAME_BUFFER_BYTES]>>,
 
     // Random number generator used for Rand operations
     rng: WrappedRng,
@@ -134,7 +135,7 @@ impl WrappedRng {
 
 impl CPU {
     pub fn new(
-        frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
+        frame_buffer: Arc<RwLock<[u8; FRAME_BUFFER_BYTES]>>,
         window_closed_receiver: Receiver<bool>,
         key_event_receiver: Receiver<Event>,
     ) -> CPU {
@@ -249,7 +250,7 @@ impl CPU {
                 info!("Clearing screen");
                 {
                     let mut fb = self.frame_buffer.write().unwrap();
-                    *fb = [0; 8 * 32];
+                    *fb = [0; FRAME_BUFFER_BYTES];
                 }
             }
             Draw {
@@ -413,18 +414,21 @@ impl CPU {
 
         for (i, byte) in sprite.iter().enumerate() {
             let bit_offset = x % 8;
-            let old_first_byte: u8 = frame_buffer[first_byte + (i * 8)];
-            let old_second_byte: u8 = frame_buffer[second_byte + (i * 8)];
+            let sprite_location_first_byte = (first_byte + (i * 8)) % FRAME_BUFFER_BYTES;
+            let sprite_location_second_byte = (second_byte + (i * 8)) % FRAME_BUFFER_BYTES;
 
-            frame_buffer[first_byte + (i * 8)] ^= byte >> bit_offset;
+            let old_first_byte: u8 = frame_buffer[sprite_location_first_byte];
+            let old_second_byte: u8 = frame_buffer[sprite_location_second_byte];
 
-            let new_first_byte = frame_buffer[first_byte + (i * 8)];
+            frame_buffer[sprite_location_first_byte] ^= byte >> bit_offset;
+
+            let new_first_byte = frame_buffer[sprite_location_first_byte];
 
             if let Some(lower_bits) = byte.checked_shl(u32::from(8 - bit_offset)) {
-                frame_buffer[second_byte + (i * 8)] ^= lower_bits
+                frame_buffer[sprite_location_second_byte] ^= lower_bits
             }
 
-            let new_second_byte = frame_buffer[second_byte + (i * 8)];
+            let new_second_byte = frame_buffer[sprite_location_second_byte];
 
             // Check if any pixel went from 1 -> 0
             for i in 0..8 {
@@ -556,6 +560,7 @@ fn get_keycode(button: Button) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::FRAME_BUFFER_BYTES;
     use super::decode_instruction;
     use super::OpCode::*;
     use super::WrappedRng;
@@ -831,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_draw_wraparound() {
+    fn execute_draw_wraparound_horizontal() {
         let mut cpu = create_cpu();
         cpu.i = 0;
         cpu.v[0] = 60;
@@ -856,6 +861,30 @@ mod tests {
             assert_eq!(0b1110, fb[7]);
             assert_eq!(0b01110000, fb[0]);
             assert_eq!(1, cpu.v[0xF]);
+            assert_eq!(0x202, cpu.pc);
+        }
+    }
+
+    #[test]
+    fn execute_draw_wraparound_vertical() {
+        let mut cpu = create_cpu();
+        cpu.i = 0;
+        cpu.v[0] = 0;
+        cpu.v[1] = 31;
+        cpu.memory[0] = 0xFF;
+        cpu.memory[1] = 0xFF;
+
+        cpu.execute(Draw {
+            reg_x: 0,
+            reg_y: 1,
+            sprite_bytes: 2,
+        });
+
+        {
+            let fb = cpu.frame_buffer.read().unwrap();
+            assert_eq!(0xFF, fb[0]);
+            assert_eq!(0xFF, fb[248]); // beginning of last row, 31*8
+            assert_eq!(0, cpu.v[0xF]);
             assert_eq!(0x202, cpu.pc);
         }
     }
@@ -1011,7 +1040,7 @@ mod tests {
     }
 
     fn create_cpu() -> CPU {
-        let frame_buffer = Arc::new(RwLock::new([0; 8 * 32]));
+        let frame_buffer = Arc::new(RwLock::new([0; FRAME_BUFFER_BYTES]));
         CPU::new(frame_buffer, channel().1, channel().1)
     }
 }

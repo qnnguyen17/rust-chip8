@@ -1,5 +1,6 @@
 extern crate piston_window;
 
+use super::FRAME_BUFFER_BYTES;
 use piston_window::*;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -10,7 +11,7 @@ const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
 const PIXEL_SCALE_FACTOR: f64 = 10.0;
 
 pub struct WindowHandler {
-    frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
+    frame_buffer: Arc<RwLock<[u8; FRAME_BUFFER_BYTES]>>,
     // Sender to notify other threads that the window is closed
     closed_sender: Sender<bool>,
     key_event_sender: Sender<Event>,
@@ -18,7 +19,7 @@ pub struct WindowHandler {
 
 impl WindowHandler {
     pub fn new(
-        frame_buffer: Arc<RwLock<[u8; 8 * 32]>>,
+        frame_buffer: Arc<RwLock<[u8; FRAME_BUFFER_BYTES]>>,
         closed_sender: Sender<bool>,
         key_event_sender: Sender<Event>,
     ) -> WindowHandler {
