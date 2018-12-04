@@ -23,6 +23,10 @@ enum OpCode {
         reg: u8,
         val: u8,
     },
+    AddRegs {
+        reg_x: u8,
+        reg_y: u8,
+    },
     AndRegs {
         reg_x: u8,
         reg_y: u8,
@@ -210,6 +214,21 @@ impl CPU {
                 );
                 self.v[reg as usize] = self.get_reg_val(reg).wrapping_add(val);
             }
+            AddRegs { reg_x, reg_y } => {
+                info!(
+                    "Adding val {}(V{}) and {}(V{}), storing in V{}",
+                    self.get_reg_val(reg_x),
+                    reg_x,
+                    self.get_reg_val(reg_y),
+                    reg_y,
+                    reg_x
+                );
+                let (sum, did_overflow) = self
+                    .get_reg_val(reg_x)
+                    .overflowing_add(self.get_reg_val(reg_y));
+                self.v[reg_x as usize] = sum;
+                self.v[0xF] = if did_overflow { 1 } else { 0 };
+            }
             AndRegs { reg_x, reg_y } => {
                 info!(
                     "AND-ing register V{} and V{}, storing value in V{}",
@@ -330,11 +349,11 @@ impl CPU {
                 new_pc = addr;
             }
             RandRegByte { reg, val } => {
-                info!(
-                    "Generating a random byte, AND-ing with {:x}, and storing in V{}",
-                    val, reg
-                );
                 let rand_val = self.rng.gen_byte();
+                info!(
+                    "Generating a random byte, {:x}, AND-ing with {:x}, and storing in V{}",
+                    rand_val, val, reg
+                );
                 self.v[reg as usize] = val & rand_val;
             }
             Ret => {
@@ -461,6 +480,10 @@ fn decode_instruction(code: &[u8]) -> OpCode {
                 reg_x: msb & 0xF,
                 reg_y: extract_upper_nibble(*lsb),
             },
+            0x4 => AddRegs {
+                reg_x: msb & 0xF,
+                reg_y: extract_upper_nibble(*lsb),
+            },
             0x6 => ShiftRightReg { reg: msb & 0xF },
             _ => panic!(
                 "Unknown op code {:x}",
@@ -555,6 +578,14 @@ mod tests {
         assert_eq!(
             AddRegByte { reg: 0, val: 8 },
             decode_instruction(&[0x70, 0x08])
+        );
+    }
+
+    #[test]
+    fn decode_add_regs() {
+        assert_eq!(
+            AddRegs { reg_x: 2, reg_y: 7 },
+            decode_instruction(&[0x82, 0x74])
         );
     }
 
@@ -693,6 +724,28 @@ mod tests {
         cpu.v[0] = 0;
         cpu.execute(AddRegByte { reg: 0, val: 16 });
         assert_eq!(16, cpu.v[0]);
+        assert_eq!(0x202, cpu.pc);
+    }
+
+    #[test]
+    fn execute_add_regs_no_overflow() {
+        let mut cpu = create_cpu();
+        cpu.v[0] = 1;
+        cpu.v[5] = 5;
+        cpu.execute(AddRegs { reg_x: 0, reg_y: 5 });
+        assert_eq!(6, cpu.v[0]);
+        assert_eq!(0, cpu.v[0xF]);
+        assert_eq!(0x202, cpu.pc);
+    }
+
+    #[test]
+    fn execute_add_regs_overflow() {
+        let mut cpu = create_cpu();
+        cpu.v[3] = 1;
+        cpu.v[7] = 0xFF;
+        cpu.execute(AddRegs { reg_x: 3, reg_y: 7 });
+        assert_eq!(0, cpu.v[3]);
+        assert_eq!(1, cpu.v[0xF]);
         assert_eq!(0x202, cpu.pc);
     }
 
