@@ -18,73 +18,73 @@ use super::FRAME_BUFFER_BYTES;
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum OpCode {
     AddIReg {
-        reg: u8,
+        reg: usize,
     },
     AddRegByte {
-        reg: u8,
+        reg: usize,
         val: u8,
     },
     AddRegs {
-        reg_x: u8,
-        reg_y: u8,
+        reg_x: usize,
+        reg_y: usize,
     },
     AndRegs {
-        reg_x: u8,
-        reg_y: u8,
+        reg_x: usize,
+        reg_y: usize,
     },
     Call {
-        addr: u16,
+        addr: usize,
     },
     Clear,
     Draw {
-        reg_x: u8,
-        reg_y: u8,
+        reg_x: usize,
+        reg_y: usize,
         sprite_bytes: u8,
     },
     LdIAddr {
-        addr: u16,
+        addr: usize,
     },
     LdIDigitReg {
-        reg: u8,
+        reg: usize,
     },
     LdMemIBcdReg {
-        reg: u8,
+        reg: usize,
     },
     LdMemIRegs {
-        last_reg: u8,
+        last_reg: usize,
     },
     LdRegByte {
-        reg: u8,
+        reg: usize,
         val: u8,
     },
     LdRegKey {
-        reg: u8,
+        reg: usize,
     },
     LdRegsMemI {
-        last_reg: u8,
+        last_reg: usize,
     },
     LdRegReg {
-        reg_x: u8,
-        reg_y: u8,
+        reg_x: usize,
+        reg_y: usize,
     },
     Jump {
-        addr: u16,
+        addr: usize,
     },
     RandRegByte {
-        reg: u8,
+        reg: usize,
         val: u8,
     },
     Ret,
     SkipEqRegBytes {
-        reg: u8,
+        reg: usize,
         val: u8,
     },
     SkipNEqRegBytes {
-        reg: u8,
+        reg: usize,
         val: u8,
     },
     ShiftRightReg {
-        reg: u8,
+        reg: usize,
     },
     Sys,
 }
@@ -93,14 +93,14 @@ pub struct CPU {
     // General-purpose registers
     v: [u8; 16],
     // Memory address register
-    i: u16,
+    i: usize,
     sound_timer: u8,
     delay_timer: u8,
     // Program counter
-    pc: u16,
+    pc: usize,
     stack: [u16; 16],
     // Stack pointer
-    sp: u8,
+    sp: usize,
     // Address space
     memory: [u8; 4096],
     // State of the 16 input keys
@@ -184,12 +184,12 @@ impl CPU {
         while let Ok(event) = self.key_event_receiver.try_recv() {
             event.press(|button| {
                 if let Some(keycode) = get_keycode(button) {
-                    self.key_state[keycode as usize] = true;
+                    self.key_state[keycode] = true;
                 }
             });
             event.release(|button| {
                 if let Some(keycode) = get_keycode(button) {
-                    self.key_state[keycode as usize] = false;
+                    self.key_state[keycode] = false;
                 }
             });
         }
@@ -199,35 +199,29 @@ impl CPU {
         let mut new_pc = self.pc + 2;
         match op {
             AddIReg { reg } => {
-                let reg_val = self.get_reg_val(reg);
+                let reg_val = self.v[reg];
                 info!(
                     "Adding {:x} from reg V{} to I's current value {:x}",
                     reg_val, reg, self.i
                 );
-                self.i += u16::from(reg_val);
+                self.i += reg_val as usize;
             }
             AddRegByte { reg, val } => {
                 info!(
                     "Adding val {:x} to register V{} to get value: {}",
                     val,
                     reg,
-                    self.get_reg_val(reg).wrapping_add(val),
+                    self.v[reg].wrapping_add(val),
                 );
-                self.v[reg as usize] = self.get_reg_val(reg).wrapping_add(val);
+                self.v[reg] = self.v[reg].wrapping_add(val);
             }
             AddRegs { reg_x, reg_y } => {
                 info!(
                     "Adding val {}(V{}) and {}(V{}), storing in V{}",
-                    self.get_reg_val(reg_x),
-                    reg_x,
-                    self.get_reg_val(reg_y),
-                    reg_y,
-                    reg_x
+                    self.v[reg_x], reg_x, self.v[reg_y], reg_y, reg_x
                 );
-                let (sum, did_overflow) = self
-                    .get_reg_val(reg_x)
-                    .overflowing_add(self.get_reg_val(reg_y));
-                self.v[reg_x as usize] = sum;
+                let (sum, did_overflow) = self.v[reg_x].overflowing_add(self.v[reg_y]);
+                self.v[reg_x] = sum;
                 self.v[0xF] = if did_overflow { 1 } else { 0 };
             }
             AndRegs { reg_x, reg_y } => {
@@ -235,14 +229,14 @@ impl CPU {
                     "AND-ing register V{} and V{}, storing value in V{}",
                     reg_x, reg_y, reg_x
                 );
-                self.v[reg_x as usize] &= self.get_reg_val(reg_y);
+                self.v[reg_x] &= self.v[reg_y];
             }
             Call { addr } => {
                 info!(
                     "Storing current PC {:x} on the stack and jumping to {:x}",
                     self.pc, addr
                 );
-                self.stack[self.sp as usize] = self.pc;
+                self.stack[self.sp] = self.pc as u16;
                 self.sp += 1;
                 new_pc = addr;
             }
@@ -258,38 +252,36 @@ impl CPU {
                 reg_y,
                 sprite_bytes,
             } => {
-                let i = self.i as usize;
                 let sprite_bytes = sprite_bytes as usize;
-                let x = self.get_reg_val(reg_x);
-                let y = self.get_reg_val(reg_y);
+                let x = self.v[reg_x];
+                let y = self.v[reg_y];
                 info!(
                     "Drawing {} bytes of sprite from address {:x} at location {},{} on the screen",
-                    sprite_bytes, i, x, y
+                    sprite_bytes, self.i, x, y
                 );
-                self.draw_sprite(i, sprite_bytes, x, y);
+                self.draw_sprite(self.i, sprite_bytes, x, y);
             }
             LdIAddr { addr } => {
                 info!("Loading reg I with address {:x}", addr);
-                self.i = addr;
+                self.i = addr as usize;
             }
             LdIDigitReg { reg } => {
-                let sprite_digit = self.get_reg_val(reg);
+                let sprite_digit = self.v[reg];
                 let addr = 5 * u16::from(sprite_digit);
                 info!(
                     "Loading I with address {:x} from V{}, where sprite digit {:x} is stored",
                     addr, reg, sprite_digit
                 );
-                self.i = addr;
+                self.i = addr as usize;
             }
             LdMemIBcdReg { reg } => {
-                let reg_val = self.get_reg_val(reg);
+                let reg_val = self.v[reg];
                 let hundreds = reg_val / 100;
                 let tens = reg_val / 10 % 10;
                 let ones = reg_val % 10;
-                let i = self.i as usize;
-                self.memory[i] = hundreds;
-                self.memory[i + 1] = tens;
-                self.memory[i + 2] = ones;
+                self.memory[self.i] = hundreds;
+                self.memory[self.i + 1] = tens;
+                self.memory[self.i + 2] = ones;
             }
             LdMemIRegs { last_reg } => {
                 info!(
@@ -299,20 +291,20 @@ impl CPU {
                     last_reg + 1
                 );
                 for i in 0..=last_reg {
-                    self.memory[(self.i + u16::from(i)) as usize] = self.get_reg_val(i);
+                    self.memory[self.i + i] = self.v[i];
                 }
-                self.i += u16::from(last_reg) + 1;
+                self.i += last_reg + 1;
             }
             LdRegByte { reg, val } => {
                 info!("Loading reg V{} with value {:x}", reg, val);
-                self.v[reg as usize] = val;
+                self.v[reg] = val;
             }
             LdRegKey { reg } => {
                 while let Ok(event) = self.key_event_receiver.recv() {
                     if let Some(true) = event.press(|button| {
                         if let Some(keycode) = get_keycode(button) {
-                            self.key_state[keycode as usize] = true;
-                            self.v[reg as usize] = keycode;
+                            self.key_state[keycode] = true;
+                            self.v[reg] = keycode as u8;
                             return true;
                         }
                         return false;
@@ -321,7 +313,7 @@ impl CPU {
                     }
                     event.release(|button| {
                         if let Some(keycode) = get_keycode(button) {
-                            self.key_state[keycode as usize] = false;
+                            self.key_state[keycode] = false;
                         }
                     });
                 }
@@ -331,19 +323,17 @@ impl CPU {
                     "Loading regs 0 through {} with data in memory starting at address {:x} and incrementing I by {}",
                     last_reg, self.i, last_reg + 1
                 );
-                for i in 0..=last_reg as usize {
-                    self.v[i] = self.memory[self.i as usize + i]
+                for i in 0..=last_reg {
+                    self.v[i] = self.memory[self.i + i]
                 }
-                self.i += u16::from(last_reg) + 1;
+                self.i += last_reg + 1;
             }
             LdRegReg { reg_x, reg_y } => {
                 info!(
                     "Setting the value of V{} to {}(V{})",
-                    reg_x,
-                    self.get_reg_val(reg_y),
-                    reg_y
+                    reg_x, self.v[reg_y], reg_y
                 );
-                self.v[reg_x as usize] = self.get_reg_val(reg_y);
+                self.v[reg_x] = self.v[reg_y];
             }
             Jump { addr } => {
                 info!("Jumping to address {:x} instead of {:x}", addr, new_pc);
@@ -355,15 +345,15 @@ impl CPU {
                     "Generating a random byte, {:x}, AND-ing with {:x}, and storing in V{}",
                     rand_val, val, reg
                 );
-                self.v[reg as usize] = val & rand_val;
+                self.v[reg] = val & rand_val;
             }
             Ret => {
                 self.sp -= 1;
-                info!("returning to address {:x}", self.stack[self.sp as usize]);
-                new_pc = self.stack[self.sp as usize] + 2;
+                info!("returning to address {:x}", self.stack[self.sp]);
+                new_pc = self.stack[self.sp] as usize + 2;
             }
             SkipEqRegBytes { reg, val } => {
-                let reg_val = self.get_reg_val(reg);
+                let reg_val = self.v[reg];
                 if reg_val == val {
                     info!(
                         "Skipping next instr because {}(V{}) == {}",
@@ -373,7 +363,7 @@ impl CPU {
                 }
             }
             SkipNEqRegBytes { reg, val } => {
-                let reg_val = self.get_reg_val(reg);
+                let reg_val = self.v[reg];
                 if reg_val != val {
                     info!(
                         "Skipping next instr because {}(V{}) != {}",
@@ -383,18 +373,14 @@ impl CPU {
                 }
             }
             ShiftRightReg { reg } => {
-                info!("Shifting-right V{} value: {:x}", reg, self.get_reg_val(reg));
-                self.v[0xF] = self.get_reg_val(reg) & 1;
-                self.v[reg as usize] >>= 1;
+                info!("Shifting-right V{} value: {:x}", reg, self.v[reg]);
+                self.v[0xF] = self.v[reg] & 1;
+                self.v[reg] >>= 1;
             }
             Sys => info!("SYS instruction found, ignoring"),
         }
 
         self.pc = new_pc;
-    }
-
-    fn get_reg_val(&mut self, reg: u8) -> u8 {
-        self.v[reg as usize]
     }
 
     fn draw_sprite(&mut self, sprite_location: usize, sprite_bytes: usize, x: u8, y: u8) {
@@ -460,35 +446,37 @@ fn decode_instruction(code: &[u8]) -> OpCode {
             addr: extract_addr(*msb, *lsb),
         },
         [msb @ 0x30...0x3F, lsb] => SkipEqRegBytes {
-            reg: msb & 0xF,
+            reg: extract_lower_nibble(*msb),
             val: *lsb,
         },
         [msb @ 0x40...0x4F, lsb] => SkipNEqRegBytes {
-            reg: msb & 0xF,
+            reg: extract_lower_nibble(*msb),
             val: *lsb,
         },
         [msb @ 0x60...0x6F, lsb] => LdRegByte {
-            reg: msb & 0xF,
+            reg: extract_lower_nibble(*msb),
             val: *lsb,
         },
         [msb @ 0x70...0x7F, lsb] => AddRegByte {
-            reg: msb & 0xF,
+            reg: extract_lower_nibble(*msb) & 0xF,
             val: *lsb,
         },
         [msb @ 0x80...0x8F, lsb] => match lsb & 0xF {
             0x0 => LdRegReg {
-                reg_x: msb & 0xF,
+                reg_x: extract_lower_nibble(*msb),
                 reg_y: extract_upper_nibble(*lsb),
             },
             0x2 => AndRegs {
-                reg_x: msb & 0xF,
+                reg_x: extract_lower_nibble(*msb),
                 reg_y: extract_upper_nibble(*lsb),
             },
             0x4 => AddRegs {
-                reg_x: msb & 0xF,
+                reg_x: extract_lower_nibble(*msb),
                 reg_y: extract_upper_nibble(*lsb),
             },
-            0x6 => ShiftRightReg { reg: msb & 0xF },
+            0x6 => ShiftRightReg {
+                reg: extract_lower_nibble(*msb),
+            },
             _ => panic!(
                 "Unknown op code {:x}",
                 *lsb as usize | ((*msb as usize) << 8)
@@ -498,23 +486,31 @@ fn decode_instruction(code: &[u8]) -> OpCode {
             addr: extract_addr(*msb, *lsb),
         },
         [msb @ 0xC0...0xCF, lsb] => RandRegByte {
-            reg: msb & 0xF,
+            reg: extract_lower_nibble(*msb),
             val: *lsb,
         },
         [msb @ 0xD0...0xDF, lsb] => Draw {
-            reg_x: msb & 0xF,
+            reg_x: extract_lower_nibble(*msb),
             reg_y: extract_upper_nibble(*lsb),
             sprite_bytes: lsb & 0xF,
         },
-        [msb @ 0xF0...0xFF, 0x0A] => LdRegKey { reg: msb & 0xF },
-        [msb @ 0xF0...0xFF, 0x1E] => AddIReg { reg: msb & 0xF },
-        [msb @ 0xF0...0xFF, 0x29] => LdIDigitReg { reg: msb & 0xF },
-        [msb @ 0xF0...0xFF, 0x33] => LdMemIBcdReg { reg: msb & 0xF },
+        [msb @ 0xF0...0xFF, 0x0A] => LdRegKey {
+            reg: extract_lower_nibble(*msb),
+        },
+        [msb @ 0xF0...0xFF, 0x1E] => AddIReg {
+            reg: extract_lower_nibble(*msb),
+        },
+        [msb @ 0xF0...0xFF, 0x29] => LdIDigitReg {
+            reg: extract_lower_nibble(*msb),
+        },
+        [msb @ 0xF0...0xFF, 0x33] => LdMemIBcdReg {
+            reg: extract_lower_nibble(*msb),
+        },
         [msb @ 0xF0...0xFF, 0x55] => LdMemIRegs {
-            last_reg: msb & 0x0F,
+            last_reg: extract_lower_nibble(*msb),
         },
         [msb @ 0xF0...0xFF, 0x65] => LdRegsMemI {
-            last_reg: msb & 0x0F,
+            last_reg: extract_lower_nibble(*msb),
         },
         [msb, lsb] => panic!(
             "Unknown op code {:x}",
@@ -525,18 +521,23 @@ fn decode_instruction(code: &[u8]) -> OpCode {
 }
 
 // Extracts the least significant 12 bits out of the two bytes representing a
-// memory address (possibly part of an instruction).
-fn extract_addr(msb: u8, lsb: u8) -> u16 {
-    u16::from(lsb) | ((u16::from(msb) & 0x0F) << 8)
+// memory address (possibly part of an instruction), and casts to usize.
+fn extract_addr(msb: u8, lsb: u8) -> usize {
+    lsb as usize | (extract_lower_nibble(msb) << 8)
 }
 
-// Extracts the most significant 4 bits
-fn extract_upper_nibble(byte: u8) -> u8 {
-    (byte & 0xF0) >> 4
+// Extracts the most significant 4 bits and casts to usize
+fn extract_upper_nibble(byte: u8) -> usize {
+    (byte as usize & 0xF0) >> 4
+}
+
+// Extract the least significant 4 bits and casts to usize
+fn extract_lower_nibble(byte: u8) -> usize {
+    byte as usize & 0xF
 }
 
 // Returns keycode 0 -> F of the button if there is one
-fn get_keycode(button: Button) -> Option<u8> {
+fn get_keycode(button: Button) -> Option<usize> {
     match button {
         Button::Keyboard(Key::D0) => Some(0),
         Button::Keyboard(Key::D1) => Some(1),
