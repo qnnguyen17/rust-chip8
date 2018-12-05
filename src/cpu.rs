@@ -75,6 +75,9 @@ enum OpCode {
         val: u8,
     },
     Ret,
+    ShiftRightReg {
+        reg: usize,
+    },
     SkipEqRegBytes {
         reg: usize,
         val: u8,
@@ -83,7 +86,10 @@ enum OpCode {
         reg: usize,
         val: u8,
     },
-    ShiftRightReg {
+    SkipRegKeyPressed {
+        reg: usize,
+    },
+    SkipRegKeyNPressed {
         reg: usize,
     },
     Sys,
@@ -352,11 +358,16 @@ impl CPU {
                 info!("returning to address {:x}", self.stack[self.sp]);
                 new_pc = self.stack[self.sp] as usize + 2;
             }
+            ShiftRightReg { reg } => {
+                info!("Shifting-right V{} value: {:x}", reg, self.v[reg]);
+                self.v[0xF] = self.v[reg] & 1;
+                self.v[reg] >>= 1;
+            }
             SkipEqRegBytes { reg, val } => {
                 let reg_val = self.v[reg];
                 if reg_val == val {
                     info!(
-                        "Skipping next instr because {}(V{}) == {}",
+                        "Skiping next instr because {}(V{}) == {}",
                         reg_val, reg, val
                     );
                     new_pc += 2;
@@ -366,16 +377,29 @@ impl CPU {
                 let reg_val = self.v[reg];
                 if reg_val != val {
                     info!(
-                        "Skipping next instr because {}(V{}) != {}",
+                        "Skiping next instr because {}(V{}) != {}",
                         reg_val, reg, val
                     );
                     new_pc += 2;
                 }
             }
-            ShiftRightReg { reg } => {
-                info!("Shifting-right V{} value: {:x}", reg, self.v[reg]);
-                self.v[0xF] = self.v[reg] & 1;
-                self.v[reg] >>= 1;
+            SkipRegKeyPressed { reg } => {
+                info!(
+                    "Skipping next instr if key {:x}, indicated by register V{} is pressed",
+                    self.v[reg], reg
+                );
+                if self.key_state[self.v[reg] as usize] {
+                    new_pc += 2;
+                }
+            }
+            SkipRegKeyNPressed { reg } => {
+                info!(
+                    "Skipping next instr if key {:x}, indicated by register V{} is _not_ pressed",
+                    self.v[reg], reg
+                );
+                if !self.key_state[self.v[reg] as usize] {
+                    new_pc += 2;
+                }
             }
             Sys => info!("SYS instruction found, ignoring"),
         }
@@ -493,6 +517,12 @@ fn decode_instruction(code: &[u8]) -> OpCode {
             reg_x: extract_lower_nibble(*msb),
             reg_y: extract_upper_nibble(*lsb),
             sprite_bytes: lsb & 0xF,
+        },
+        [msb @ 0xE0...0xEF, 0x9E] => SkipRegKeyPressed {
+            reg: extract_lower_nibble(*msb),
+        },
+        [msb @ 0xE0...0xEF, 0xA1] => SkipRegKeyNPressed {
+            reg: extract_lower_nibble(*msb),
         },
         [msb @ 0xF0...0xFF, 0x0A] => LdRegKey {
             reg: extract_lower_nibble(*msb),
@@ -691,6 +721,11 @@ mod tests {
     }
 
     #[test]
+    fn decode_shift_right_reg() {
+        assert_eq!(ShiftRightReg { reg: 0 }, decode_instruction(&[0x80, 0x66]));
+    }
+
+    #[test]
     fn decode_skip_eq_reg_bytes() {
         assert_eq!(
             SkipEqRegBytes { reg: 0, val: 0x16 },
@@ -707,8 +742,19 @@ mod tests {
     }
 
     #[test]
-    fn decode_shift_right_reg() {
-        assert_eq!(ShiftRightReg { reg: 0 }, decode_instruction(&[0x80, 0x66]));
+    fn decode_skip_reg_key_pressed() {
+        assert_eq!(
+            SkipRegKeyPressed { reg: 9 },
+            decode_instruction(&[0xE9, 0x9E])
+        );
+    }
+
+    #[test]
+    fn decode_skip_reg_key_npressed() {
+        assert_eq!(
+            SkipRegKeyNPressed { reg: 0xC },
+            decode_instruction(&[0xEC, 0xA1])
+        );
     }
 
     //
@@ -994,6 +1040,27 @@ mod tests {
     }
 
     #[test]
+    fn execute_shift_right_reg_set_vf() {
+        let mut cpu = create_cpu();
+        cpu.v[0] = 0b1111;
+        cpu.execute(ShiftRightReg { reg: 0 });
+        assert_eq!(0b111, cpu.v[0]);
+        assert_eq!(1, cpu.v[0xF]);
+        assert_eq!(0x202, cpu.pc);
+    }
+
+    #[test]
+    fn execute_shift_right_reg_unset_vf() {
+        let mut cpu = create_cpu();
+        cpu.v[0] = 0b110;
+        cpu.v[0xF] = 1;
+        cpu.execute(ShiftRightReg { reg: 0 });
+        assert_eq!(0b11, cpu.v[0]);
+        assert_eq!(0, cpu.v[0xF]);
+        assert_eq!(0x202, cpu.pc);
+    }
+
+    #[test]
     fn execute_skip_eq_reg_bytes() {
         let mut cpu = create_cpu();
         cpu.v[4] = 16;
@@ -1020,23 +1087,32 @@ mod tests {
     }
 
     #[test]
-    fn execute_shift_right_reg_unset_vf() {
+    fn execute_skip_reg_key_pressed() {
         let mut cpu = create_cpu();
-        cpu.v[0] = 0b110;
-        cpu.v[0xF] = 1;
-        cpu.execute(ShiftRightReg { reg: 0 });
-        assert_eq!(0b11, cpu.v[0]);
-        assert_eq!(0, cpu.v[0xF]);
+        cpu.v[4] = 7;
+        cpu.key_state[7] = true;
+        cpu.execute(SkipRegKeyPressed { reg: 4 });
+        assert_eq!(0x204, cpu.pc);
+
+        let mut cpu = create_cpu();
+        cpu.v[5] = 6;
+        cpu.key_state[6] = false;
+        cpu.execute(SkipRegKeyPressed { reg: 5 });
         assert_eq!(0x202, cpu.pc);
     }
 
     #[test]
-    fn execute_shift_right_reg_set_vf() {
+    fn execute_skip_reg_key_npressed() {
         let mut cpu = create_cpu();
-        cpu.v[0] = 0b1111;
-        cpu.execute(ShiftRightReg { reg: 0 });
-        assert_eq!(0b111, cpu.v[0]);
-        assert_eq!(1, cpu.v[0xF]);
+        cpu.v[4] = 7;
+        cpu.key_state[7] = false;
+        cpu.execute(SkipRegKeyNPressed { reg: 4 });
+        assert_eq!(0x204, cpu.pc);
+
+        let mut cpu = create_cpu();
+        cpu.v[5] = 6;
+        cpu.key_state[6] = true;
+        cpu.execute(SkipRegKeyNPressed { reg: 5 });
         assert_eq!(0x202, cpu.pc);
     }
 
