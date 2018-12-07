@@ -147,6 +147,14 @@ fn decode_skip_neq_reg_bytes() {
 }
 
 #[test]
+fn decode_skip_neq_regs() {
+    assert_eq!(
+        SkipNEqRegs { reg_x: 4, reg_y: 5 },
+        decode_instruction(&[0x94, 0x50])
+    );
+}
+
+#[test]
 fn decode_skip_reg_key_pressed() {
     assert_eq!(
         SkipRegKeyPressed { reg: 9 },
@@ -488,6 +496,21 @@ fn execute_skip_neq_reg_bytes() {
     let mut cpu = create_cpu();
     cpu.v[4] = 14;
     cpu.execute(SkipNEqRegBytes { reg: 4, val: 16 });
+    assert_eq!(0x204, cpu.pc);
+}
+
+#[test]
+fn execute_skip_neq_regs() {
+    let mut cpu = create_cpu();
+    cpu.v[4] = 17;
+    cpu.v[5] = 17;
+    cpu.execute(SkipNEqRegs { reg_x: 4, reg_y: 5 });
+    assert_eq!(0x202, cpu.pc);
+
+    let mut cpu = create_cpu();
+    cpu.v[4] = 14;
+    cpu.v[5] = 18;
+    cpu.execute(SkipNEqRegs { reg_x: 4, reg_y: 5 });
     assert_eq!(0x204, cpu.pc);
 }
 

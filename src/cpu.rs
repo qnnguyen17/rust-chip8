@@ -87,6 +87,10 @@ enum OpCode {
         reg: usize,
         val: u8,
     },
+    SkipNEqRegs {
+        reg_x: usize,
+        reg_y: usize,
+    },
     SkipRegKeyPressed {
         reg: usize,
     },
@@ -385,6 +389,15 @@ impl CPU {
                     new_pc += 2;
                 }
             }
+            SkipNEqRegs { reg_x, reg_y } => {
+                info!(
+                    "Skipping next instruction if {}(V{}) != {}(V{})",
+                    self.v[reg_x], reg_x, self.v[reg_y], reg_y
+                );
+                if self.v[reg_x] != self.v[reg_y] {
+                    new_pc += 2;
+                }
+            }
             SkipRegKeyPressed { reg } => {
                 info!(
                     "Skipping next instr if key {:x}, indicated by register V{} is pressed",
@@ -507,6 +520,10 @@ fn decode_instruction(code: &[u8]) -> OpCode {
                 "Unknown op code {:x}",
                 *lsb as usize | ((*msb as usize) << 8)
             ),
+        },
+        [msb @ 0x90...0x9F, lsb] => SkipNEqRegs {
+            reg_x: extract_lower_nibble(*msb),
+            reg_y: extract_upper_nibble(*lsb),
         },
         [msb @ 0xA0...0xAF, lsb] => LdIAddr {
             addr: extract_addr(*msb, *lsb),
