@@ -113,6 +113,17 @@ fn decode_jump() {
 }
 
 #[test]
+fn decode_or_regs() {
+    assert_eq!(
+        OrRegs {
+            reg_x: 5,
+            reg_y: 0xA
+        },
+        decode_instruction(&[0x85, 0xA1])
+    );
+}
+
+#[test]
 fn decode_rand_reg_byte() {
     assert_eq!(
         RandRegByte { reg: 5, val: 0x15 },
@@ -123,6 +134,11 @@ fn decode_rand_reg_byte() {
 #[test]
 fn decode_ret() {
     assert_eq!(Ret, decode_instruction(&[0x00, 0xEE]));
+}
+
+#[test]
+fn decode_shift_left_reg() {
+    assert_eq!(ShiftLeftReg { reg: 0 }, decode_instruction(&[0x80, 0x9E]));
 }
 
 #[test]
@@ -167,6 +183,14 @@ fn decode_skip_reg_key_npressed() {
     assert_eq!(
         SkipRegKeyNPressed { reg: 0xC },
         decode_instruction(&[0xEC, 0xA1])
+    );
+}
+
+#[test]
+fn decode_xor_regs() {
+    assert_eq!(
+        XorRegs { reg_x: 1, reg_y: 2 },
+        decode_instruction(&[0x81, 0x23])
     );
 }
 
@@ -433,6 +457,16 @@ fn execute_jump() {
 }
 
 #[test]
+fn execute_or_regs() {
+    let mut cpu = create_cpu();
+    cpu.v[5] = 0b1100;
+    cpu.v[7] = 1;
+    cpu.execute(OrRegs { reg_x: 5, reg_y: 7 });
+    assert_eq!(cpu.v[5], 0b1101);
+    assert_eq!(0x202, cpu.pc);
+}
+
+#[test]
 fn execute_rand_reg_byte() {
     let mut cpu = create_cpu();
     // The CPU's RNG will always yield 0xF
@@ -450,6 +484,27 @@ fn execute_ret() {
     cpu.execute(Ret);
     assert_eq!(0x202, cpu.pc);
     assert_eq!(0, cpu.sp);
+}
+
+#[test]
+fn execute_shift_left_reg_set_vf() {
+    let mut cpu = create_cpu();
+    cpu.v[0] = 0b10000010;
+    cpu.execute(ShiftLeftReg { reg: 0 });
+    assert_eq!(0b100, cpu.v[0]);
+    assert_eq!(1, cpu.v[0xF]);
+    assert_eq!(0x202, cpu.pc);
+}
+
+#[test]
+fn execute_shift_left_reg_unset_vf() {
+    let mut cpu = create_cpu();
+    cpu.v[0] = 0b110;
+    cpu.v[0xF] = 1;
+    cpu.execute(ShiftLeftReg { reg: 0 });
+    assert_eq!(0b1100, cpu.v[0]);
+    assert_eq!(0, cpu.v[0xF]);
+    assert_eq!(0x202, cpu.pc);
 }
 
 #[test]
@@ -541,6 +596,16 @@ fn execute_skip_reg_key_npressed() {
     cpu.v[5] = 6;
     cpu.key_state[6] = true;
     cpu.execute(SkipRegKeyNPressed { reg: 5 });
+    assert_eq!(0x202, cpu.pc);
+}
+
+#[test]
+fn execute_xor_regs() {
+    let mut cpu = create_cpu();
+    cpu.v[1] = 0b1111;
+    cpu.v[2] = 0b1010;
+    cpu.execute(XorRegs { reg_x: 1, reg_y: 2 });
+    assert_eq!(cpu.v[1], 0b0101);
     assert_eq!(0x202, cpu.pc);
 }
 

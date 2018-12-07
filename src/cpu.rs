@@ -71,11 +71,18 @@ enum OpCode {
     Jump {
         addr: usize,
     },
+    OrRegs {
+        reg_x: usize,
+        reg_y: usize,
+    },
     RandRegByte {
         reg: usize,
         val: u8,
     },
     Ret,
+    ShiftLeftReg {
+        reg: usize,
+    },
     ShiftRightReg {
         reg: usize,
     },
@@ -98,6 +105,10 @@ enum OpCode {
         reg: usize,
     },
     Sys,
+    XorRegs {
+        reg_x: usize,
+        reg_y: usize,
+    },
 }
 
 pub struct CPU {
@@ -351,6 +362,13 @@ impl CPU {
                 info!("Jumping to address {:x} instead of {:x}", addr, new_pc);
                 new_pc = addr;
             }
+            OrRegs { reg_x, reg_y } => {
+                info!(
+                    "ORing {}(V{}) with {}(V{}) and storing in V{}",
+                    self.v[reg_x], reg_x, self.v[reg_y], reg_y, reg_x
+                );
+                self.v[reg_x] |= self.v[reg_y];
+            }
             RandRegByte { reg, val } => {
                 let rand_val = self.rng.gen_byte();
                 info!(
@@ -363,6 +381,11 @@ impl CPU {
                 self.sp -= 1;
                 info!("returning to address {:x}", self.stack[self.sp]);
                 new_pc = self.stack[self.sp] as usize + 2;
+            }
+            ShiftLeftReg { reg } => {
+                info!("Shifting-left V{} value: {:x}", reg, self.v[reg]);
+                self.v[0xF] = (self.v[reg] >> 7) & 1;
+                self.v[reg] <<= 1;
             }
             ShiftRightReg { reg } => {
                 info!("Shifting-right V{} value: {:x}", reg, self.v[reg]);
@@ -417,6 +440,13 @@ impl CPU {
                 }
             }
             Sys => info!("SYS instruction found, ignoring"),
+            XorRegs { reg_x, reg_y } => {
+                info!(
+                    "XORing {}(V{}) with {}(V{}) and storing in V{}",
+                    self.v[reg_x], reg_x, self.v[reg_y], reg_y, reg_x
+                );
+                self.v[reg_x] ^= self.v[reg_y];
+            }
         }
 
         self.pc = new_pc;
@@ -505,7 +535,15 @@ fn decode_instruction(code: &[u8]) -> OpCode {
                 reg_x: extract_lower_nibble(*msb),
                 reg_y: extract_upper_nibble(*lsb),
             },
+            0x1 => OrRegs {
+                reg_x: extract_lower_nibble(*msb),
+                reg_y: extract_upper_nibble(*lsb),
+            },
             0x2 => AndRegs {
+                reg_x: extract_lower_nibble(*msb),
+                reg_y: extract_upper_nibble(*lsb),
+            },
+            0x3 => XorRegs {
                 reg_x: extract_lower_nibble(*msb),
                 reg_y: extract_upper_nibble(*lsb),
             },
@@ -514,6 +552,9 @@ fn decode_instruction(code: &[u8]) -> OpCode {
                 reg_y: extract_upper_nibble(*lsb),
             },
             0x6 => ShiftRightReg {
+                reg: extract_lower_nibble(*msb),
+            },
+            0xE => ShiftLeftReg {
                 reg: extract_lower_nibble(*msb),
             },
             _ => panic!(
@@ -586,8 +627,8 @@ fn extract_lower_nibble(byte: u8) -> usize {
 }
 
 // Returns keycode 0 -> F of the button if there is one
-// Since the actual keypad of the CHIP8 spec doesn't exist in a normal keyboard, we map it as follows:
-// 1234            123C
+// Since the actual keypad of the CHIP8 spec doesn't exist in a normal keyboard,
+// we map it as follows: 1234            123C
 // QWER     =>     456D
 // ASDF            789E
 // ZXCV            A0BF
