@@ -1,6 +1,4 @@
-extern crate piston_window;
-
-use super::FRAME_BUFFER_BYTES;
+use crate::FRAME_BUFFER_BYTES;
 use piston_window::*;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;

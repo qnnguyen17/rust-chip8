@@ -1,9 +1,6 @@
 mod cpu;
 mod digits;
 mod window;
-#[macro_use]
-extern crate log;
-extern crate env_logger;
 
 use std::env;
 use std::sync::mpsc::channel;
