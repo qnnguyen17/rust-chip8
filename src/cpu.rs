@@ -586,24 +586,29 @@ fn extract_lower_nibble(byte: u8) -> usize {
 }
 
 // Returns keycode 0 -> F of the button if there is one
+// Since the actual keypad of the CHIP8 spec doesn't exist in a normal keyboard, we map it as follows:
+// 1234            123C
+// QWER     =>     456D
+// ASDF            789E
+// ZXCV            A0BF
 fn get_keycode(button: Button) -> Option<usize> {
     match button {
-        Button::Keyboard(Key::D0) => Some(0),
         Button::Keyboard(Key::D1) => Some(1),
         Button::Keyboard(Key::D2) => Some(2),
         Button::Keyboard(Key::D3) => Some(3),
-        Button::Keyboard(Key::D4) => Some(4),
-        Button::Keyboard(Key::D5) => Some(5),
-        Button::Keyboard(Key::D6) => Some(6),
-        Button::Keyboard(Key::D7) => Some(7),
-        Button::Keyboard(Key::D8) => Some(8),
-        Button::Keyboard(Key::D9) => Some(9),
-        Button::Keyboard(Key::A) => Some(0xA),
-        Button::Keyboard(Key::B) => Some(0xB),
-        Button::Keyboard(Key::C) => Some(0xC),
-        Button::Keyboard(Key::D) => Some(0xD),
-        Button::Keyboard(Key::E) => Some(0xE),
-        Button::Keyboard(Key::F) => Some(0xF),
+        Button::Keyboard(Key::D4) => Some(0xC),
+        Button::Keyboard(Key::Q) => Some(4),
+        Button::Keyboard(Key::W) => Some(5),
+        Button::Keyboard(Key::E) => Some(6),
+        Button::Keyboard(Key::R) => Some(0xD),
+        Button::Keyboard(Key::A) => Some(7),
+        Button::Keyboard(Key::S) => Some(8),
+        Button::Keyboard(Key::D) => Some(9),
+        Button::Keyboard(Key::F) => Some(0xE),
+        Button::Keyboard(Key::Z) => Some(0xA),
+        Button::Keyboard(Key::C) => Some(0xB),
+        Button::Keyboard(Key::X) => Some(0),
+        Button::Keyboard(Key::V) => Some(0xF),
         _ => None,
     }
 }
