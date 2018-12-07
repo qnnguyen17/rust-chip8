@@ -1,4 +1,3 @@
-use crate::cpu::OpCode::*;
 use crate::cpu::*;
 use crate::FRAME_BUFFER_BYTES;
 use rand::rngs::mock::StepRng;
