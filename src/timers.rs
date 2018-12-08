@@ -31,7 +31,7 @@ impl Timers {
                 .execute_at_fixed_rate(ZERO_DURATION, SIXTY_HZ_DURATION, move || {
                     let mut delay_timer = delay_timer.lock().unwrap();
                     if *delay_timer > 0 {
-                        *delay_timer = *delay_timer - 1;
+                        *delay_timer -= 1;
                     }
                 });
         self.delay_timer_handle = Option::Some(handle)
