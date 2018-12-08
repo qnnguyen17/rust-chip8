@@ -197,6 +197,17 @@ fn decode_skip_reg_key_npressed() {
 }
 
 #[test]
+fn decode_sub_regs() {
+    assert_eq!(
+        SubRegs {
+            reg_x: 4,
+            reg_y: 0xA
+        },
+        decode_instruction(&[0x84, 0xA5])
+    );
+}
+
+#[test]
 fn decode_xor_regs() {
     assert_eq!(
         XorRegs { reg_x: 1, reg_y: 2 },
@@ -628,6 +639,32 @@ fn execute_skip_reg_key_npressed() {
     cpu.v[5] = 6;
     cpu.key_state[6] = true;
     cpu.execute(SkipRegKeyNPressed { reg: 5 });
+    assert_eq!(0x202, cpu.pc);
+}
+
+#[test]
+fn execute_sub_regs_underflow() {
+    let mut cpu = create_cpu();
+    cpu.v[4] = 3;
+    cpu.v[6] = 2;
+    cpu.v[0xF] = 1;
+    cpu.execute(SubRegs { reg_x: 4, reg_y: 6 });
+    assert_eq!(1, cpu.v[4]);
+    assert_eq!(0, cpu.v[0xF]);
+    assert_eq!(0x202, cpu.pc);
+}
+
+#[test]
+fn execute_sub_regs_now_underflow() {
+    let mut cpu = create_cpu();
+    cpu.v[0xA] = 1;
+    cpu.v[0xD] = 2;
+    cpu.execute(SubRegs {
+        reg_x: 0xA,
+        reg_y: 0xD,
+    });
+    assert_eq!(0xFF, cpu.v[0xA]);
+    assert_eq!(1, cpu.v[0xF]);
     assert_eq!(0x202, cpu.pc);
 }
 

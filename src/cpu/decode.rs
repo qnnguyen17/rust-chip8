@@ -50,6 +50,10 @@ pub(in crate::cpu) fn decode_instruction(code: &[u8]) -> OpCode {
                 reg_x: extract_lower_nibble(*msb),
                 reg_y: extract_upper_nibble(*lsb),
             },
+            0x5 => SubRegs {
+                reg_x: extract_lower_nibble(*msb),
+                reg_y: extract_upper_nibble(*lsb),
+            },
             0x6 => ShiftRightReg {
                 reg: extract_lower_nibble(*msb),
             },

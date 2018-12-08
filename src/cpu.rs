@@ -113,6 +113,10 @@ enum OpCode {
     SkipRegKeyNPressed {
         reg: usize,
     },
+    SubRegs {
+        reg_x: usize,
+        reg_y: usize,
+    },
     Sys,
     XorRegs {
         reg_x: usize,
@@ -458,6 +462,14 @@ impl CPU {
                 if !self.key_state[self.v[reg] as usize] {
                     new_pc += 2;
                 }
+            }
+            SubRegs { reg_x, reg_y } => {
+                info!(
+                    "Subtracting {}(V{}) from {}(V{}) and storing in V{}",
+                    self.v[reg_y], reg_y, self.v[reg_x], reg_x, reg_x
+                );
+                self.v[0xF] = if self.v[reg_y] > self.v[reg_x] { 1 } else { 0 };
+                self.v[reg_x] = self.v[reg_x].wrapping_sub(self.v[reg_y]);
             }
             Sys => info!("SYS instruction found, ignoring"),
             XorRegs { reg_x, reg_y } => {
