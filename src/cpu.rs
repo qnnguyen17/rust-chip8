@@ -468,7 +468,7 @@ impl CPU {
                     "Subtracting {}(V{}) from {}(V{}) and storing in V{}",
                     self.v[reg_y], reg_y, self.v[reg_x], reg_x, reg_x
                 );
-                self.v[0xF] = if self.v[reg_y] > self.v[reg_x] { 1 } else { 0 };
+                self.v[0xF] = if self.v[reg_x] > self.v[reg_y] { 1 } else { 0 };
                 self.v[reg_x] = self.v[reg_x].wrapping_sub(self.v[reg_y]);
             }
             Sys => info!("SYS instruction found, ignoring"),

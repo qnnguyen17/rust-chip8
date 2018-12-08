@@ -96,6 +96,8 @@ pub(in crate::cpu) fn decode_instruction(code: &[u8]) -> OpCode {
         [msb @ 0xF0...0xFF, 0x15] => LdDtReg {
             reg: extract_lower_nibble(*msb),
         },
+        // TODO: implement the sound timer
+        [0xF0...0xFF, 0x18] => Sys,
         [msb @ 0xF0...0xFF, 0x1E] => AddIReg {
             reg: extract_lower_nibble(*msb),
         },

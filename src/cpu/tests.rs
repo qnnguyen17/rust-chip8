@@ -647,24 +647,24 @@ fn execute_sub_regs_underflow() {
     let mut cpu = create_cpu();
     cpu.v[4] = 3;
     cpu.v[6] = 2;
-    cpu.v[0xF] = 1;
     cpu.execute(SubRegs { reg_x: 4, reg_y: 6 });
     assert_eq!(1, cpu.v[4]);
-    assert_eq!(0, cpu.v[0xF]);
+    assert_eq!(1, cpu.v[0xF]);
     assert_eq!(0x202, cpu.pc);
 }
 
 #[test]
-fn execute_sub_regs_now_underflow() {
+fn execute_sub_regs_no_underflow() {
     let mut cpu = create_cpu();
     cpu.v[0xA] = 1;
     cpu.v[0xD] = 2;
+    cpu.v[0xF] = 1;
     cpu.execute(SubRegs {
         reg_x: 0xA,
         reg_y: 0xD,
     });
     assert_eq!(0xFF, cpu.v[0xA]);
-    assert_eq!(1, cpu.v[0xF]);
+    assert_eq!(0, cpu.v[0xF]);
     assert_eq!(0x202, cpu.pc);
 }
 
