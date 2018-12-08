@@ -3,6 +3,7 @@ use crate::FRAME_BUFFER_BYTES;
 use rand::rngs::mock::StepRng;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 
 //
@@ -55,6 +56,11 @@ fn decode_draw() {
 }
 
 #[test]
+fn ld_dt_reg() {
+    assert_eq!(LdDtReg { reg: 4 }, decode_instruction(&[0xF4, 0x15]));
+}
+
+#[test]
 fn decode_ld_i_addr() {
     assert_eq!(LdIAddr { addr: 0x123 }, decode_instruction(&[0xA1, 0x23]));
 }
@@ -83,6 +89,11 @@ fn decode_ld_reg_byte() {
         LdRegByte { reg: 1, val: 0xFF },
         decode_instruction(&[0x61, 0xFF])
     );
+}
+
+#[test]
+fn decode_ld_reg_dt() {
+    assert_eq!(LdRegDt { reg: 6 }, decode_instruction(&[0xF6, 0x07]));
 }
 
 #[test]
@@ -373,6 +384,18 @@ fn execute_draw_wraparound_vertical() {
 }
 
 #[test]
+fn execute_ld_dt_reg() {
+    let mut cpu = create_cpu();
+    cpu.v[3] = 25;
+    cpu.execute(LdDtReg { reg: 3 });
+    {
+        let delay_timer = cpu.delay_timer.lock().unwrap();
+        assert_eq!(25, *delay_timer);
+    }
+    assert_eq!(0x202, cpu.pc);
+}
+
+#[test]
 fn execute_ld_i_addr() {
     let mut cpu = create_cpu();
     cpu.execute(LdIAddr { addr: 0x123 });
@@ -419,6 +442,16 @@ fn execute_ld_reg_byte() {
     let mut cpu = create_cpu();
     cpu.execute(LdRegByte { reg: 1, val: 0xFF });
     assert_eq!(0xFF, cpu.v[1]);
+    assert_eq!(0x202, cpu.pc);
+}
+
+#[test]
+fn execute_ld_reg_dt() {
+    let mut cpu = create_cpu();
+    *cpu.delay_timer.lock().unwrap() = 25;
+    cpu.v[3] = 16;
+    cpu.execute(LdRegDt { reg: 3 });
+    assert_eq!(25, cpu.v[3]);
     assert_eq!(0x202, cpu.pc);
 }
 
@@ -611,5 +644,6 @@ fn execute_xor_regs() {
 #[cfg(test)]
 fn create_cpu() -> CPU {
     let frame_buffer = Arc::new(RwLock::new([0; FRAME_BUFFER_BYTES]));
-    CPU::new(frame_buffer, channel().1, channel().1)
+    let delay_timer = Arc::new(Mutex::new(0));
+    CPU::new(delay_timer, frame_buffer, channel().1, channel().1)
 }

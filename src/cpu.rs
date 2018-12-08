@@ -11,6 +11,7 @@ use std::io::prelude::*;
 use std::io::Result;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 
 use self::decode::*;
@@ -44,6 +45,9 @@ enum OpCode {
         reg_y: usize,
         sprite_bytes: u8,
     },
+    LdDtReg {
+        reg: usize,
+    },
     LdIAddr {
         addr: usize,
     },
@@ -59,6 +63,9 @@ enum OpCode {
     LdRegByte {
         reg: usize,
         val: u8,
+    },
+    LdRegDt {
+        reg: usize,
     },
     LdRegKey {
         reg: usize,
@@ -119,7 +126,8 @@ pub struct CPU {
     // Memory address register
     i: usize,
     sound_timer: u8,
-    delay_timer: u8,
+    delay_timer: Arc<Mutex<u8>>,
+
     // Program counter
     pc: usize,
     stack: [u16; 16],
@@ -160,6 +168,7 @@ impl WrappedRng {
 
 impl CPU {
     pub fn new(
+        delay_timer: Arc<Mutex<u8>>,
         frame_buffer: Arc<RwLock<[u8; FRAME_BUFFER_BYTES]>>,
         window_closed_receiver: Receiver<bool>,
         key_event_receiver: Receiver<Event>,
@@ -170,7 +179,7 @@ impl CPU {
             v: [0; 16],
             i: 0,
             sound_timer: 0,
-            delay_timer: 0,
+            delay_timer,
             // Most chip8 programs start at 0x200
             pc: 0x200,
             stack: [0; 16],
@@ -286,6 +295,11 @@ impl CPU {
                 );
                 self.draw_sprite(self.i, sprite_bytes, x, y);
             }
+            LdDtReg { reg } => {
+                info!("Loading delay timer with {}(V{})", self.v[reg], reg);
+                let mut delay_timer = self.delay_timer.lock().unwrap();
+                *delay_timer = self.v[reg];
+            }
             LdIAddr { addr } => {
                 info!("Loading reg I with address {:x}", addr);
                 self.i = addr as usize;
@@ -323,6 +337,10 @@ impl CPU {
             LdRegByte { reg, val } => {
                 info!("Loading reg V{} with value {:x}", reg, val);
                 self.v[reg] = val;
+            }
+            LdRegDt { reg } => {
+                info!("Loading reg V{} with value {} from DT", reg, self.v[reg]);
+                self.v[reg] = *self.delay_timer.lock().unwrap();
             }
             LdRegKey { reg } => {
                 while let Ok(event) = self.key_event_receiver.recv() {

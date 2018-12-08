@@ -1,10 +1,12 @@
 mod cpu;
 mod digits;
+mod timers;
 mod window;
 
 use std::env;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 use std::thread;
 
@@ -34,11 +36,20 @@ fn main() {
         })
         .expect("failed to spawn window thread");
 
+    let delay_timer = Arc::new(Mutex::new(0));
+
+    let mut timers = timers::Timers::new(delay_timer.clone());
+    timers.start();
+
     let processor_thread = thread::Builder::new()
         .name("processor".to_string())
         .spawn(move || {
-            let mut processor =
-                cpu::CPU::new(frame_buffer_2, window_closed_receiver, key_event_receiver);
+            let mut processor = cpu::CPU::new(
+                delay_timer,
+                frame_buffer_2,
+                window_closed_receiver,
+                key_event_receiver,
+            );
             processor.load_game_data(&filename).unwrap();
             processor.run();
         })
@@ -46,4 +57,5 @@ fn main() {
 
     window_thread.join().unwrap();
     processor_thread.join().unwrap();
+    timers.stop();
 }

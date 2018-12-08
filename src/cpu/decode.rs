@@ -83,7 +83,13 @@ pub(in crate::cpu) fn decode_instruction(code: &[u8]) -> OpCode {
         [msb @ 0xE0...0xEF, 0xA1] => SkipRegKeyNPressed {
             reg: extract_lower_nibble(*msb),
         },
+        [msb @ 0xF0...0xFF, 0x07] => LdRegDt {
+            reg: extract_lower_nibble(*msb),
+        },
         [msb @ 0xF0...0xFF, 0x0A] => LdRegKey {
+            reg: extract_lower_nibble(*msb),
+        },
+        [msb @ 0xF0...0xFF, 0x15] => LdDtReg {
             reg: extract_lower_nibble(*msb),
         },
         [msb @ 0xF0...0xFF, 0x1E] => AddIReg {
