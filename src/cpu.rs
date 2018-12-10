@@ -13,11 +13,15 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
+use std::thread;
+use std::time::Duration;
 
 use self::decode::*;
 use self::OpCode::*;
 use super::digits::DIGITS;
 use super::FRAME_BUFFER_BYTES;
+
+const SLEEP_DURATION: Duration = Duration::from_micros(1500);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum OpCode {
@@ -215,6 +219,8 @@ impl CPU {
             let code = &self.memory[pc..pc + 2];
             let instr = decode_instruction(&code);
             self.execute(instr);
+
+           thread::sleep(SLEEP_DURATION);
         }
     }
 
