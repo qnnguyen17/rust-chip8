@@ -1,5 +1,4 @@
-use super::OpCode;
-use super::OpCode::*;
+use crate::cpu::*;
 use piston_window::*;
 
 pub(in crate::cpu) fn decode_instruction(code: &[u8]) -> OpCode {
